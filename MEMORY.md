@@ -1,5 +1,13 @@
 # MEMORY
 
+## 2026-10-29 12:30 K 线的设计取舍（#6）
+
+- 只有「正在走的 1m」随 `MarketState` 存档，已收盘的写世界目录的只追加文件（见 ADR-0005）；启动时 `KlineStore.bind` 先 `discardAfter(存档市场时间)` 再读回，靠行情确定性重放对账，崩溃后也不缺不重。核心单测 `MarketKlinesTest` 覆盖干净重启和崩溃重启。
+- 成交量是占位值（`BASE_VOLUME × (1 + |对数收益| / 步波动率)`），不改随机数序列；真成交量接入后要换掉（见 HUM_MEMO）。
+- 客户端没有行走线的 API：MC 26.1 的 `GuiGraphicsExtractor` 只有 fill / 水平线 / 竖线，均线要按列补满竖向像素（`KlineChart.extractAverage`）。发包是 `net.neoforged.neoforge.client.network.ClientPacketDistributor.sendToServer`，不是 `PacketDistributor.sendToServer`。
+- `/creeper dev market advance <步数>` 只广播最后一步，客户端发现行情步不连续会重新拉取 K 线；自动截图靠它在 `ScreenshotScript` 里快进 5 个市场日再截不同周期。
+- 载荷字段变了（快照多了成交量，行情带 24h 统计）已把 `PROTOCOL_VERSION` 升到 "3"。
+
 ## 2026-10-29 12:00 双层定价的设计取舍（#5）
 
 - 资金费率的 P 用币安时间加权均值 (1·P1+…+n·Pn)/(1+…+n)，状态只存样本数和加权和；标记价格里的「最近一期资金费率」取本期实时预估费率（用户确认）。

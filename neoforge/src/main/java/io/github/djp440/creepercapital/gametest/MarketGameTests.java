@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -13,9 +14,14 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import io.github.djp440.creepercapital.CreeperCapital;
+import io.github.djp440.creepercapital.core.kline.Candle;
+import io.github.djp440.creepercapital.core.kline.CandlePeriod;
+import io.github.djp440.creepercapital.core.kline.Stats24h;
 import io.github.djp440.creepercapital.core.market.Market;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.PricingState;
+import io.github.djp440.creepercapital.network.KlineHistoryPayload;
+import io.github.djp440.creepercapital.network.KlineRequestPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.server.MarketSavedData;
 import io.github.djp440.creepercapital.server.ServerMarket;
@@ -30,6 +36,7 @@ import net.minecraft.gametest.framework.TestEnvironmentDefinition;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -43,7 +50,7 @@ import net.neoforged.neoforge.event.RegisterGameTestsEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 /**
- * 行情同步、市场持久化与 dev 命令的 GameTest。测试函数随模组注册；测试实例只在 NeoForge 启用 GameTest 时注册
+ * 行情同步、K 线、市场持久化与 dev 命令的 GameTest。测试函数随模组注册；测试实例只在 NeoForge 启用 GameTest 时注册
  * （开发环境与 GameTestServer，见 {@code GameTestHooks.isGametestEnabled}），生产环境不会出现。
  */
 public final class MarketGameTests {
@@ -69,6 +76,8 @@ public final class MarketGameTests {
                 throw new UncheckedIOException(e);
             }
         });
+        function("kline_payloads_round_trip", MarketGameTests::klinePayloadsRoundTrip);
+        function("kline_history_follows_the_market", MarketGameTests::klineHistoryFollowsTheMarket);
         function("dev_market_command_is_op_only", MarketGameTests::devMarketCommandIsOpOnly);
         function("pre_pricing_save_loads_with_zero_premium", MarketGameTests::prePricingSaveLoadsWithZeroPremium);
         FUNCTIONS.register(modBus);
@@ -124,13 +133,72 @@ public final class MarketGameTests {
 
     /** 行情快照载荷经编码、解码后保持不变。 */
     private static void marketSnapshotPayloadRoundTrips(GameTestHelper helper) {
-        MarketSnapshotPayload payload = new MarketSnapshotPayload(new MarketSnapshot(7L, "DIAMONDCRP", 1012.345678, 1013.1, 1012.9, -0.00025));
+        MarketSnapshotPayload payload = new MarketSnapshotPayload(
+                new MarketSnapshot(7L, "DIAMONDCRP", 1012.345678, 1013.1, 1012.9, -0.00025, 6.25),
+                new Stats24h(1000.5, 1020.75, 995.25, 1013.1, 12345.5));
         RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
 
         MarketSnapshotPayload.STREAM_CODEC.encode(buffer, payload);
 
         helper.assertValueEqual(MarketSnapshotPayload.STREAM_CODEC.decode(buffer), payload, "解码后的行情快照载荷");
         helper.succeed();
+    }
+
+    /** K 线请求与历史载荷经编码、解码后保持不变；未知的周期编号会被拒绝。 */
+    private static void klinePayloadsRoundTrip(GameTestHelper helper) {
+        RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
+        KlineRequestPayload request = new KlineRequestPayload(CandlePeriod.H4);
+        KlineRequestPayload.STREAM_CODEC.encode(buffer, request);
+        helper.assertValueEqual(KlineRequestPayload.STREAM_CODEC.decode(buffer), request, "解码后的 K 线请求载荷");
+
+        KlineHistoryPayload history = new KlineHistoryPayload(CandlePeriod.M15, List.of(
+                new Candle(900, 1000.5, 1003.25, 998.0, 1001.75, 42.5),
+                new Candle(1_800, 1001.75, 1001.75, 990.125, 991.0, 7.0)));
+        KlineHistoryPayload.STREAM_CODEC.encode(buffer, history);
+        helper.assertValueEqual(KlineHistoryPayload.STREAM_CODEC.decode(buffer), history, "解码后的 K 线历史载荷");
+
+        RegistryFriendlyByteBuf bad = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
+        ByteBufCodecs.VAR_INT.encode(bad, CandlePeriod.values().length);
+        boolean rejected = false;
+        try {
+            KlineRequestPayload.STREAM_CODEC.decode(bad);
+        } catch (IllegalArgumentException e) {
+            rejected = true;
+        }
+        helper.assertTrue(rejected, "未知的周期编号应被拒绝");
+        helper.succeed();
+    }
+
+    /**
+     * 服务端按请求的周期返回历史 K 线，最后一根是当前 K 线，与此刻的最新价格一致；
+     * 之后随行情步更新，周期越大越是由 1m 聚合而成（边界对齐）。
+     */
+    private static void klineHistoryFollowsTheMarket(GameTestHelper helper) {
+        ServerPlayer player = MockClient.join(helper, "carol");
+        helper.runAfterDelay(45, () -> {
+            try {
+                ServerMarket.sendKlines(player, CandlePeriod.M1);
+                ServerMarket.sendKlines(player, CandlePeriod.M15);
+                List<KlineHistoryPayload> responses = MockClient.received(player, KlineHistoryPayload.class);
+                helper.assertValueEqual(responses.size(), 2, "收到的 K 线历史响应数");
+                KlineHistoryPayload minutes = responses.get(0);
+                KlineHistoryPayload quarters = responses.get(1);
+                helper.assertValueEqual(minutes.period(), CandlePeriod.M1, "第一个响应的周期");
+                helper.assertValueEqual(quarters.period(), CandlePeriod.M15, "第二个响应的周期");
+
+                Candle currentMinute = minutes.candles().get(minutes.candles().size() - 1);
+                Candle currentQuarter = quarters.candles().get(quarters.candles().size() - 1);
+                helper.assertValueEqual(currentMinute.close(), ServerMarket.snapshot().lastPrice(), "当前 1m 的收盘价");
+                helper.assertValueEqual(currentMinute.start(), CandlePeriod.M1.startOf(ServerMarket.snapshot().time().totalSeconds()),
+                        "当前 1m 的起点按市场时间对齐");
+                helper.assertValueEqual(currentQuarter.close(), currentMinute.close(), "当前 15m 与 1m 同价收盘");
+                helper.assertValueEqual(currentQuarter.start() % CandlePeriod.M15.seconds(), 0L, "15m 的起点对齐 15 个市场分钟");
+                helper.assertTrue(currentQuarter.start() <= currentMinute.start(), "15m 包含当前这根 1m");
+                helper.succeed();
+            } finally {
+                MockClient.leave(player);
+            }
+        });
     }
 
     /** 市场写进存档文件、重新读出后，市场时间和价格与存档时一致，之后紧接着继续推进，不补算。 */
@@ -213,6 +281,8 @@ public final class MarketGameTests {
         Market market = MarketSavedData.CODEC.parse(NbtOps.INSTANCE, oldSave).getOrThrow().market();
 
         helper.assertValueEqual(market.state().pricing(), PricingState.INITIAL, "旧存档的定价状态");
+        helper.assertTrue(market.state().liveMinute() == null, "没有 K 线的旧存档不带正在走的 1m");
+        helper.assertValueEqual(market.state().lastVolume(), 0.0, "没有 K 线的旧存档成交量从 0 开始");
         helper.assertValueEqual(market.snapshot().lastPrice(), 987.5, "零溢价时最新价格等于指数价格");
         helper.succeed();
     }

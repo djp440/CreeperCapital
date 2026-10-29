@@ -7,9 +7,18 @@
   "screen.creepercapital.trading.mark_price": "标记价格",
   "screen.creepercapital.trading.index_price": "指数价格",
   "screen.creepercapital.trading.funding": "资金费率 / 倒计时",
+  "screen.creepercapital.trading.change_24h": "24h 涨跌",
+  "screen.creepercapital.trading.high_24h": "24h 最高",
+  "screen.creepercapital.trading.low_24h": "24h 最低",
+  "screen.creepercapital.trading.volume_24h": "24h 成交量",
   "screen.creepercapital.trading.waiting": "等待行情…",
   "screen.creepercapital.trading.market_time": "市场时间",
   "screen.creepercapital.trading.market_time.value": "第 %s 日 %s",
+  "screen.creepercapital.trading.kline.loading": "K 线加载中…",
+  "screen.creepercapital.trading.kline.volume": "成交量",
+  "screen.creepercapital.trading.kline.axis_time": "第%s日 %s",
+  "screen.creepercapital.trading.kline.axis_day": "第%s日",
   "commands.creepercapital.market.paused": "市场已暂停",
-  "commands.creepercapital.market.resumed": "市场已恢复"
+  "commands.creepercapital.market.resumed": "市场已恢复",
+  "commands.creepercapital.market.advanced": "市场已快进 %s 个行情步"
 }

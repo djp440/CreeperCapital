@@ -5,6 +5,7 @@ import org.lwjgl.glfw.GLFW;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import io.github.djp440.creepercapital.CreeperCapital;
+import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
 import net.minecraft.client.KeyMapping;
@@ -43,7 +44,8 @@ public final class CreeperCapitalClient {
     }
 
     private static void onRegisterPayloadHandlers(RegisterClientPayloadHandlersEvent event) {
-        event.register(MarketSnapshotPayload.TYPE, (payload, context) -> ClientMarket.accept(payload.snapshot()));
+        event.register(MarketSnapshotPayload.TYPE, (payload, context) -> ClientMarket.accept(payload));
+        event.register(KlineHistoryPayload.TYPE, (payload, context) -> ClientKlines.accept(payload));
         event.register(OpenTradingScreenPayload.TYPE, (payload, context) -> TradingScreen.open());
     }
 

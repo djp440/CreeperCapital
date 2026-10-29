@@ -7,9 +7,18 @@
   "screen.creepercapital.trading.mark_price": "Mark Price",
   "screen.creepercapital.trading.index_price": "Index Price",
   "screen.creepercapital.trading.funding": "Funding / Countdown",
+  "screen.creepercapital.trading.change_24h": "24h Change",
+  "screen.creepercapital.trading.high_24h": "24h High",
+  "screen.creepercapital.trading.low_24h": "24h Low",
+  "screen.creepercapital.trading.volume_24h": "24h Volume",
   "screen.creepercapital.trading.waiting": "Waiting for market data...",
   "screen.creepercapital.trading.market_time": "Market Time",
   "screen.creepercapital.trading.market_time.value": "Day %s %s",
+  "screen.creepercapital.trading.kline.loading": "Loading candles...",
+  "screen.creepercapital.trading.kline.volume": "Vol",
+  "screen.creepercapital.trading.kline.axis_time": "D%s %s",
+  "screen.creepercapital.trading.kline.axis_day": "D%s",
   "commands.creepercapital.market.paused": "Market paused",
-  "commands.creepercapital.market.resumed": "Market resumed"
+  "commands.creepercapital.market.resumed": "Market resumed",
+  "commands.creepercapital.market.advanced": "Market advanced %s steps"
 }

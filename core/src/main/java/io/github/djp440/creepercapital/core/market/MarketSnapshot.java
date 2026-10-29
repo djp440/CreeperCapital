@@ -9,9 +9,10 @@ package io.github.djp440.creepercapital.core.market;
  * @param lastPrice   最新价格 = 指数价格 × (1 + 溢价)
  * @param markPrice   标记价格
  * @param fundingRate 本期实时预估的资金费率（比例，0.0001 即 0.01%）
+ * @param volume      这个行情步内的成交量（标的资源数量），K 线的成交量由它累计；新市场的第 0 步为 0
  */
 public record MarketSnapshot(long step, String symbol, double indexPrice, double lastPrice, double markPrice,
-        double fundingRate) {
+        double fundingRate, double volume) {
 
     /** 此刻的市场时间：每个行情步 6 市场秒。 */
     public MarketTime time() {

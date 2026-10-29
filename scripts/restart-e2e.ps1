@@ -1,10 +1,11 @@
 # 端到端重启测试：真实启动专用服务端三次，验证市场状态随世界存档保存、停服重启后接着走（不补算）、暂停状态保持。
 # 用法：pwsh -NoProfile -File scripts/restart-e2e.ps1
 # 流程：
-#   1. 删除旧测试世界，启动服务端，等行情推进几步，执行 creeper dev market pause，再 stop。
-#   2. 第二次启动：断言从存档恢复、步数与停服时一致、暂停保持；等待数秒确认冻结（不补算、不推进）。
-#      然后 creeper dev market resume，断言下一个行情步恰好是「停服步数 + 1」。运行中 stop。
-#   3. 离线几秒后第三次启动：断言恢复的步数不变，第一个行情步仍是「停服步数 + 1」（运行中停服同样不补算）。
+#   1. 删除旧测试世界，启动服务端，等行情推进几步，用 creeper dev market advance 快进 2000 步攒出 K 线，
+#      再执行 creeper dev market pause，再 stop。
+#   2. 第二次启动：断言从存档恢复、步数与停服时一致、暂停保持；K 线文件读回的根数与步数一致（不缺不重）；
+#      等待数秒确认冻结（不补算、不推进）。然后 creeper dev market resume，断言下一个行情步恰好是「停服步数 + 1」。运行中 stop。
+#   3. 离线几秒后第三次启动：断言恢复的步数不变、K 线根数仍与步数一致，第一个行情步仍是「停服步数 + 1」（运行中停服同样不补算）。
 # 断言依据服务端自己写的开发日志 logs/yyyy-MM-dd HH-mm-ss.log（每次启动一个文件）；
 # 服务端控制台输出另存为 logs/restart-e2e <时间> 第N次.stdout.log，本脚本的过程记录在 logs/restart-e2e <时间>.log。
 [CmdletBinding()]
@@ -47,7 +48,7 @@ function Start-Server([string]$label, [int]$index) {
     $stdoutFile = [System.IO.File]::Create((Join-Path $logDir "restart-e2e $stamp 第${index}次.stdout.log"))
     $copyOut = $proc.StandardOutput.BaseStream.CopyToAsync($stdoutFile)
     $copyErr = $proc.StandardError.BaseStream.CopyToAsync([System.IO.Stream]::Null)
-    return @{ Process = $proc; Before = $before; DevLog = $null; Offset = 0L; Seen = (New-Object System.Collections.Generic.List[string]) }
+    return @{ Process = $proc; Before = $before; DevLog = $null; Offset = 0L; Seen = (New-Object System.Collections.Generic.List[string]); Pending = (New-Object System.Collections.Generic.List[string]) }
 }
 
 # 读出开发日志里新增的完整行（服务端写日志时共享读取）。
@@ -71,14 +72,26 @@ function Read-NewLines($server) {
     return $text.Substring(0, $lastNewline + 1) -split "`r?`n" | Where-Object { $_ -ne '' }
 }
 
-# 等到开发日志出现匹配 $pattern 的行并返回；超时或服务端提前退出则失败。
+# 取出尚未处理的日志行：上次匹配之后剩下的行排在前面，再接上日志里新增的行。
+function Take-Lines($server) {
+    $lines = @($server.Pending) + @(Read-NewLines $server)
+    $server.Pending.Clear()
+    return $lines
+}
+
+# 等到开发日志出现匹配 $pattern 的行并返回；匹配行之后同一批读到的行留给下一次调用，不丢。超时或服务端提前退出则失败。
 function Wait-ForLine($server, [string]$pattern, [int]$timeoutSec) {
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     while ((Get-Date) -lt $deadline) {
-        foreach ($line in (Read-NewLines $server)) {
+        $lines = @(Take-Lines $server)
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
             $server.Seen.Add($line)
             if ($line -match '\[(ServerMarket|MinecraftServer)\]') { Write-Log $line }
-            if ($line -match $pattern) { return $line }
+            if ($line -match $pattern) {
+                for ($j = $i + 1; $j -lt $lines.Count; $j++) { $server.Pending.Add($lines[$j]) }
+                return $line
+            }
         }
         if ($server.Process.HasExited) { break }
         Start-Sleep -Milliseconds 100
@@ -89,7 +102,7 @@ function Wait-ForLine($server, [string]$pattern, [int]$timeoutSec) {
 # 把当前已写入的日志读完，返回其中匹配 $pattern 的行（用于断言“这段时间里没有发生某事”）。
 function Drain-Matching($server, [string]$pattern) {
     $hits = @()
-    foreach ($line in (Read-NewLines $server)) {
+    foreach ($line in (Take-Lines $server)) {
         $server.Seen.Add($line)
         if ($line -match '\[(ServerMarket|MinecraftServer)\]') { Write-Log $line }
         if ($line -match $pattern) { $hits += $line }
@@ -121,6 +134,17 @@ function Get-Step([string]$line, [string]$pattern) {
 
 $snapshotStep = 'step=(\d+),'
 $stepLog = '行情步 (\d+)：'
+$klineLog = 'K 线存储 .*读回 1m (\d+) 根、1h (\d+) 根、1d (\d+) 根'
+
+# 重启后 K 线存储读回的根数必须与市场步数严格对应：1 行情步 = 6 市场秒，所以 1m 共 floor(步数/10)+1 根（含正在走的一根），
+# 1h 共 floor(步数/600)+1 根，1d 共 floor(步数/14400)+1 根。多了说明重复，少了说明有缺口。
+function Assert-Klines($server, [long]$step, [string]$who) {
+    $line = Wait-ForLine $server $klineLog 30
+    $m = [regex]::Match($line, $klineLog)
+    Assert-True ([long]$m.Groups[1].Value -eq [math]::Floor($step / 10) + 1) "$who：1m K 线 $($m.Groups[1].Value) 根，与步数 $step 对应（不缺不重）"
+    Assert-True ([long]$m.Groups[2].Value -eq [math]::Floor($step / 600) + 1) "$who：1h K 线 $($m.Groups[2].Value) 根，与步数 $step 对应"
+    Assert-True ([long]$m.Groups[3].Value -eq [math]::Floor($step / 14400) + 1) "$who：1d K 线 $($m.Groups[3].Value) 根，与步数 $step 对应"
+}
 try {
     if (Test-Path $worldDir) { Remove-Item -Recurse -Force $worldDir }
 
@@ -128,6 +152,8 @@ try {
     $first = Start-Server '第 1 次' 1
     Wait-ForLine $first '新建市场' $StartupTimeoutSec | Out-Null
     Wait-ForLine $first '行情步 5：' 60 | Out-Null
+    Send-Command $first 'creeper dev market advance 2000'
+    Wait-ForLine $first 'Market advanced|市场已快进' 60 | Out-Null
     Send-Command $first 'creeper dev market pause'
     Wait-ForLine $first 'Market paused|市场已暂停' 30 | Out-Null
     Start-Sleep -Seconds 2
@@ -135,7 +161,10 @@ try {
     Assert-True ($stopLine -match $snapshotStep) '第 1 次停服时记录了市场步数'
     $savedStep = Get-Step $stopLine $snapshotStep
     Assert-True ($savedStep -ge 5) "停服前市场已推进到第 $savedStep 步（>= 5）"
+    Assert-True ($savedStep -ge 2005) "快进后市场已推进到第 $savedStep 步（>= 2005）"
     Assert-True ($stopLine -match '暂停=true') '停服时市场处于暂停'
+    $klineDir = Join-Path $worldDir 'creepercapital/klines'
+    Assert-True ((Test-Path (Join-Path $klineDir 'DIAMONDCRP-1m.klines')) -and (Test-Path (Join-Path $klineDir 'DIAMONDCRP-1h.klines'))) 'K 线文件已写进世界目录'
 
     # ---- 第二次启动：从存档恢复、保持暂停，恢复后不补算 ----
     $second = Start-Server '第 2 次' 2
@@ -143,6 +172,7 @@ try {
     Assert-True ($restoreLine -match '从存档恢复市场') '重启后从存档恢复市场，而不是新建'
     Assert-True ((Get-Step $restoreLine $snapshotStep) -eq $savedStep) "恢复的步数与停服时一致（$savedStep）"
     Assert-True ($restoreLine -match '暂停=true') '暂停状态在重启后保持'
+    Assert-Klines $second $savedStep '第 2 次启动'
 
     Start-Sleep -Seconds $FrozenWaitSec
     $advanced = @(Drain-Matching $second $stepLog)
@@ -163,6 +193,7 @@ try {
     Assert-True ($restoreLine3 -match '从存档恢复市场') '第 3 次启动从存档恢复市场'
     Assert-True ((Get-Step $restoreLine3 $snapshotStep) -eq $savedStep2) "恢复的步数与第 2 次停服时一致（$savedStep2）"
     Assert-True ($restoreLine3 -match '暂停=false') '未暂停的市场重启后仍在运行'
+    Assert-Klines $third $savedStep2 '第 3 次启动'
     $next3 = Wait-ForLine $third $stepLog 60
     $nextStep3 = Get-Step $next3 $stepLog
     Assert-True ($nextStep3 -eq $savedStep2 + 1) "离线 $OfflineSec 秒后，第一个行情步是 $nextStep3，紧接停服前的第 $savedStep2 步（不补算）"

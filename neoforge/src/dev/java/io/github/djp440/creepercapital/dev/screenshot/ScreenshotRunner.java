@@ -95,6 +95,7 @@ final class ScreenshotRunner {
                 }
                 ScreenshotStep step = ScreenshotScript.STEPS.get(stepIndex);
                 LOGGER.info("自动截图 {}：打开视图 {}", step.id(), step.view());
+                step.prepare().accept(minecraft);
                 step.view().open(minecraft);
                 phaseTicks = 0;
                 phase = Phase.CAPTURE;

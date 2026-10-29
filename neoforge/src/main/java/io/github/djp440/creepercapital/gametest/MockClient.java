@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.mojang.authlib.GameProfile;
 
+import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -37,7 +38,8 @@ final class MockClient {
         // 模拟连接没有走 NeoForge 通道协商；把本模组的载荷登记为 ad-hoc 通道，等同于装了本模组的客户端。
         // ChannelAttributes 是 NeoForge 内部 API，只在测试里使用。
         ChannelAttributes.getOrCreateAdHocChannels(connection)
-                .addAll(List.of(MarketSnapshotPayload.TYPE.id(), OpenTradingScreenPayload.TYPE.id()));
+                .addAll(List.of(MarketSnapshotPayload.TYPE.id(), OpenTradingScreenPayload.TYPE.id(),
+                        KlineHistoryPayload.TYPE.id()));
         server.getPlayerList().placeNewPlayer(connection, player, cookie);
         return player;
     }
