@@ -18,6 +18,7 @@ import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderExtras;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
@@ -25,6 +26,7 @@ import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.core.trading.TradingState;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.world.level.saveddata.SavedData;
@@ -72,6 +74,15 @@ public final class TradingSavedData extends SavedData {
             Codec.LONG.fieldOf("market_seconds").forGetter(PlayerTrade::marketSeconds))
             .apply(i, PlayerTrade::new));
 
+    /** 附加条款是 #15 新增的，旧存档的委托没有这些字段，全部缺省为没有。 */
+    private static final Codec<OrderExtras> EXTRAS_CODEC = RecordCodecBuilder.create(i -> i.group(
+            Codec.BOOL.optionalFieldOf("reduce_only", false).forGetter(OrderExtras::reduceOnly),
+            Codec.STRING.xmap(TriggerSource::valueOf, TriggerSource::name)
+                    .optionalFieldOf("trigger_source", TriggerSource.LAST).forGetter(OrderExtras::triggerSource),
+            Codec.DOUBLE.optionalFieldOf("attached_take_profit", 0.0).forGetter(OrderExtras::attachedTakeProfit),
+            Codec.DOUBLE.optionalFieldOf("attached_stop_loss", 0.0).forGetter(OrderExtras::attachedStopLoss))
+            .apply(i, OrderExtras::new));
+
     private static final Codec<Order> ORDER_CODEC = RecordCodecBuilder.create(i -> i.group(
             Codec.LONG.fieldOf("id").forGetter(Order::id),
             UUIDUtil.CODEC.fieldOf("player").forGetter(Order::player),
@@ -87,7 +98,8 @@ public final class TradingSavedData extends SavedData {
             MONEY.fieldOf("fee").forGetter(Order::fee),
             Codec.LONG.fieldOf("created_seconds").forGetter(Order::createdSeconds),
             Codec.LONG.fieldOf("closed_seconds").forGetter(Order::closedSeconds),
-            Codec.STRING.xmap(CancelReason::valueOf, CancelReason::name).fieldOf("cancel_reason").forGetter(Order::cancelReason))
+            Codec.STRING.xmap(CancelReason::valueOf, CancelReason::name).fieldOf("cancel_reason").forGetter(Order::cancelReason),
+            EXTRAS_CODEC.optionalFieldOf("extras", OrderExtras.NONE).forGetter(Order::extras))
             .apply(i, Order::new));
 
     private static final Codec<TradingState> STATE_CODEC = RecordCodecBuilder.create(i -> i.group(

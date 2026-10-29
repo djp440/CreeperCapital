@@ -8,6 +8,8 @@ import io.github.djp440.creepercapital.client.ClientMarket;
 import io.github.djp440.creepercapital.client.ClientTrading;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
+import io.github.djp440.creepercapital.core.trading.OrderType;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.Minecraft;
 
@@ -141,7 +143,27 @@ final class ScreenshotScript {
                             + "GUNPOWDERCRP 开多限价 10 个，刚被撤单（状态「已撤销」灰字，成交价与手续费显示 \"--\"）；"
                             + "DIAMONDCRP 的开空挂单仍在「当前委托」页，不出现在这里；列不重叠、无乱码。",
                     View.ORDER_HISTORY,
-                    fillAndCancelOrders()));
+                    fillAndCancelOrders()),
+            new ScreenshotStep("19", "止盈止损设置（GUNPOWDERCRP，3 级验收）",
+                    "下单面板里，数量框下面的小页签条是「预估 | 止盈止损」，「止盈止损」为黄字加下划线（输入框里已填价格，所以页签文字后面带黄色星号）；页内左右并排两个输入框：止盈价（约最新价 105%，单位 CRP）、止损价（约最新价 97%）；"
+                            + "其下是触发价来源开关「触发：标记价格」和「只减仓」复选框（未勾选）；"
+                            + "页签条右侧是缩短的仓位提示「多 5 · 20x」（绿字）；此时下单面板仍在限价模式，所以是面板最拥挤的情形；"
+                            + "底部由于 GUNPOWDERCRP 已有多仓，按钮行是绿色「开多」、红色「开空」，其下一行分成「限价平仓」与「设止盈止损」两个按钮（完整显示，不被截断）；"
+                            + "整个面板不越出面板底部，不与图表、盘口重叠，无错位和乱码。",
+                    View.PROTECTION,
+                    markTrigger()),
+            new ScreenshotStep("20", "当前委托页：止盈止损单与限价平仓（3 级验收）",
+                    "「当前委托」页签为黄字加下划线；最新的五行（更早的 DIAMONDCRP 开空限价单被表格高度截在第六行之外）依次是 GUNPOWDERCRP 的止盈、止损单（类型列分别是「止盈·标记价」「止损·标记价」，"
+                            + "方向列是「平多」，委托/触发价列是触发价，约为最新价的 110% 与 90%，数量 5），DIAMONDCRP 的止盈、止损单（类型「止盈·最新价」「止损·最新价」，"
+                            + "方向「平空」，数量 1.500），以及一张 GUNPOWDERCRP「限价只减仓」平多单（委托价约最新价 120%）；平仓类委托没有冻结资金，冻结列显示 \"--\"；"
+                            + "每行有「撤单」按钮；列不重叠、无乱码。",
+                    View.OPEN_ORDERS,
+                    placeProtectionOrders()),
+            new ScreenshotStep("21", "历史委托页：撤销的止损单（3 级验收）",
+                    "「历史委托」页签为黄字加下划线；最新一条是 DIAMONDCRP 的「止损·最新价」单，方向「平空」，状态「已撤销」灰字，成交价与手续费显示 \"--\"；"
+                            + "委托/触发价列是触发价而不是成交价；列不重叠、无乱码。",
+                    View.ORDER_HISTORY,
+                    cancelDiamondStopLoss()));
 
     private ScreenshotScript() {
     }
@@ -198,6 +220,42 @@ final class ScreenshotScript {
             ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> ClientTrading.sendLimit(
                     OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 5, snapshot.lastPrice() * 1.5));
         };
+    }
+
+    /** 触发价来源开关切到标记价格，让截图里能看到开关的文字。 */
+    private static Consumer<Minecraft> markTrigger() {
+        return minecraft -> ClientTrading.setTriggerSource(TriggerSource.MARK);
+    }
+
+    /**
+     * 给两个仓位设止盈止损：GUNPOWDERCRP 多仓（标记价格触发，约 110% / 90%），DIAMONDCRP 空仓（最新价格触发，约 90% / 110%），
+     * 再给 GUNPOWDERCRP 挂一张高于市价 20% 的限价只减仓平多单。
+     */
+    private static Consumer<Minecraft> placeProtectionOrders() {
+        return minecraft -> {
+            ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> {
+                ClientTrading.setTriggerSource(TriggerSource.MARK);
+                ClientTrading.position("GUNPOWDERCRP").ifPresent(position -> {
+                    ClientTrading.sendOrder(OrderPayload.Action.PROTECT, "GUNPOWDERCRP", position.lots(),
+                            OrderPayload.Execution.MARKET, 0, snapshot.lastPrice() * 1.1, snapshot.lastPrice() * 0.9);
+                    ClientTrading.sendOrder(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", position.lots(),
+                            OrderPayload.Execution.LIMIT, snapshot.lastPrice() * 1.2, 0, 0);
+                });
+            });
+            ClientMarket.snapshot("DIAMONDCRP").ifPresent(snapshot -> {
+                ClientTrading.setTriggerSource(TriggerSource.LAST);
+                ClientTrading.position("DIAMONDCRP").ifPresent(position -> ClientTrading.sendOrder(
+                        OrderPayload.Action.PROTECT, "DIAMONDCRP", position.lots(), OrderPayload.Execution.MARKET, 0,
+                        snapshot.lastPrice() * 0.9, snapshot.lastPrice() * 1.1));
+            });
+        };
+    }
+
+    /** 撤掉 DIAMONDCRP 的止损单，历史委托里就有一条已撤销的止损。 */
+    private static Consumer<Minecraft> cancelDiamondStopLoss() {
+        return minecraft -> ClientTrading.openOrdersNewestFirst().stream()
+                .filter(order -> order.symbol().equals("DIAMONDCRP") && order.type() == OrderType.STOP_LOSS)
+                .findFirst().ifPresent(order -> ClientTrading.cancel(order.id()));
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {

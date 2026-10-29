@@ -105,6 +105,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：下单面板切到止盈止损页并填好止盈价、止损价（可选限价模式），底部表格切到某页。 */
+    public static void openForProtection(String tab, String quantity, String takeProfit, String stopLoss) {
+        openForTrading(tab, quantity);
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.orderPanel.setProtection(takeProfit, stopLoss);
+        }
+    }
+
     public static void open() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
@@ -126,6 +134,8 @@ public final class TradingScreen extends Screen {
         // 输入框只登记为子部件（接收键盘和点击），不放进可渲染列表：它要画在下单面板的底色之上，由面板自己渲染
         addWidget(orderPanel.quantityBox());
         addWidget(orderPanel.priceBox());
+        addWidget(orderPanel.takeProfitBox());
+        addWidget(orderPanel.stopLossBox());
     }
 
     /** 单人游戏里打开交易界面不暂停游戏，市场照常推进。 */
@@ -141,8 +151,8 @@ public final class TradingScreen extends Screen {
             contractMenuOpen = false;
             return true;
         }
-        if ((orderPanel.quantityBox().isFocused() || orderPanel.priceBox().isFocused()) && event.key() != GLFW.GLFW_KEY_ESCAPE) {
-            // 在数量 / 委托价输入框里打字时，快捷键字母不能关掉界面
+        if (orderPanel.anyInputFocused() && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+            // 在数量 / 委托价 / 止盈止损价输入框里打字时，快捷键字母不能关掉界面
             return super.keyPressed(event);
         }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
@@ -155,15 +165,13 @@ public final class TradingScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0 && clickedContractControls(event.x(), event.y())) {
-            orderPanel.quantityBox().setFocused(false);
-            orderPanel.priceBox().setFocused(false);
+            orderPanel.unfocusInputs();
             return true;
         }
         if (event.button() == 0) {
             String symbol = ClientMarket.selectedSymbol().orElse(null);
             if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
-                orderPanel.quantityBox().setFocused(false);
-                orderPanel.priceBox().setFocused(false);
+                orderPanel.unfocusInputs();
                 return true;
             }
             if (marketColumn.mouseClicked(event.x(), event.y())) {

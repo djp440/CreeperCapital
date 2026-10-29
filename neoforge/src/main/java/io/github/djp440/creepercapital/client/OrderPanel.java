@@ -12,6 +12,7 @@ import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -21,7 +22,11 @@ import net.minecraft.util.FormattedCharSequence;
 
 /**
  * 下单面板（币安下单区）：顶部切换「市价」「限价」，选杠杆、填数量（限价还要填委托价），点「开多」「开空」开仓，
- * 或点「平仓」市价平掉当前合约的仓位。限价单挂在服务端，价格穿越委托价才成交，挂单期间冻结保证金。
+ * 或点「平仓」平掉当前合约的仓位（市价立即平，限价则挂只减仓限价单）。限价单挂在服务端，价格穿越委托价才成交，挂单期间冻结保证金。
+ * <p>
+ * 数量下方有「预估」「止盈止损」两页：预估页是可用余额与预估成交价、保证金、手续费；止盈止损页填止盈价、止损价，选触发价来源
+ * （最新价格 / 标记价格）和只减仓开关。开仓时填了止盈止损就随开仓附带；有仓位时「设止盈止损」给现有仓位补设。
+ * 只减仓开着时，「开多」「开空」是买入 / 卖出缩减反向仓位，永远不会开仓。面板高度很紧，所以两页共用同一块区域。
  * <p>
  * 已有仓位时杠杆固定为仓位的杠杆（杠杆不能和仓位不同），「平仓」留空数量就是全平。面板上的预估成交价、保证金和手续费只是提示，
  * 实际成交以服务端为准；下单结果（成交或拒单原因）由服务端回报，显示在面板底部。
@@ -41,6 +46,8 @@ final class OrderPanel {
     private final Font font;
     private final EditBox quantityBox;
     private final EditBox priceBox;
+    private final EditBox takeProfitBox;
+    private final EditBox stopLossBox;
     /** 每帧渲染时记下各按钮的区域，点击判定要用：{左, 上, 右, 下}。 */
     private int[] minus = new int[4];
     private int[] plus = new int[4];
@@ -49,6 +56,11 @@ final class OrderPanel {
     private int[] closeBox = new int[4];
     private int[] marketTab = new int[4];
     private int[] limitTab = new int[4];
+    private int[] estimateTab = new int[4];
+    private int[] protectionTab = new int[4];
+    private int[] sourceBox = new int[4];
+    private int[] reduceBox = new int[4];
+    private int[] protectBox = new int[4];
 
     OrderPanel(Font font) {
         this.font = font;
@@ -64,6 +76,43 @@ final class OrderPanel {
         priceBox.setMaxLength(16);
         priceBox.setFilter(text -> text.chars().allMatch(c -> (c >= '0' && c <= '9') || c == '.'));
         priceBox.setHint(Component.translatable("screen.creepercapital.trading.order.limit_price_hint"));
+        this.takeProfitBox = triggerBox("screen.creepercapital.trading.order.take_profit_field");
+        this.stopLossBox = triggerBox("screen.creepercapital.trading.order.stop_loss_field");
+    }
+
+    private EditBox triggerBox(String key) {
+        EditBox box = new EditBox(font, 0, 0, WIDTH / 2 - PAD - 8, INPUT_HEIGHT - 6, Component.translatable(key));
+        box.setBordered(false);
+        box.setMaxLength(16);
+        box.setFilter(text -> text.chars().allMatch(c -> (c >= '0' && c <= '9') || c == '.'));
+        box.setHint(Component.translatable(key));
+        return box;
+    }
+
+    boolean anyInputFocused() {
+        return quantityBox.isFocused() || priceBox.isFocused() || takeProfitBox.isFocused() || stopLossBox.isFocused();
+    }
+
+    void unfocusInputs() {
+        quantityBox.setFocused(false);
+        priceBox.setFocused(false);
+        takeProfitBox.setFocused(false);
+        stopLossBox.setFocused(false);
+    }
+
+    EditBox takeProfitBox() {
+        return takeProfitBox;
+    }
+
+    EditBox stopLossBox() {
+        return stopLossBox;
+    }
+
+    /** 开发用（自动截图）：切到止盈止损页并填好止盈价、止损价。 */
+    void setProtection(String takeProfit, String stopLoss) {
+        ClientTrading.setProtectionPage(true);
+        takeProfitBox.setValue(takeProfit);
+        stopLossBox.setValue(stopLoss);
     }
 
     EditBox priceBox() {
@@ -157,11 +206,43 @@ final class OrderPanel {
         quantityBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
         y += INPUT_HEIGHT + 5;
 
-        // 预估：可用余额、成交价、保证金、手续费
+        // 预估页 / 止盈止损页共用同一块区域（面板高度很紧）
+        boolean protectionPage = ClientTrading.protectionPage();
+        takeProfitBox.visible = protectionPage;
+        takeProfitBox.active = protectionPage;
+        stopLossBox.visible = protectionPage;
+        stopLossBox.active = protectionPage;
+        if (!protectionPage) {
+            takeProfitBox.setFocused(false);
+            stopLossBox.setFocused(false);
+        }
+        int estimateWidth = font.width(Component.translatable("screen.creepercapital.trading.order.tab.estimate")) + 12;
+        Component protectionLabel = protectionLabel();
+        int protectionWidth = font.width(protectionLabel) + 12;
+        estimateTab = new int[] {x, y - 2, x + estimateWidth, y + ROW};
+        protectionTab = new int[] {x + estimateWidth, y - 2, x + estimateWidth + protectionWidth, y + ROW};
+        modeTab(graphics, estimateTab, Component.translatable("screen.creepercapital.trading.order.tab.estimate"),
+                !protectionPage, mouseX, mouseY);
+        modeTab(graphics, protectionTab, protectionLabel, protectionPage, mouseX, mouseY);
+        if (position != null && protectionPage) {
+            // 止盈止损页放不下单独一行的仓位提示，缩短后放在页签条右侧
+            Component held = Component.translatable("screen.creepercapital.trading.order.holding_short",
+                    Component.translatable(position.side() == Side.LONG
+                            ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
+                    Quantities.format(position.lots(), position.quantityDecimals()), position.leverage());
+            graphics.text(font, held, right - PAD - font.width(held), y,
+                    position.side() == Side.LONG ? BinancePalette.UP : BinancePalette.DOWN, false);
+        }
+        y += ROW + 3;
         OptionalLong lots = params == null ? OptionalLong.empty() : Quantities.parseLots(quantityBox.getValue(), params.quantityDecimals());
-        y = extractInfo(graphics, x, right - PAD, y, params, snapshot, lots, leverage, limit ? limitPrice() : OptionalDouble.empty(),
-                limit);
-        if (position != null) {
+        if (protectionPage) {
+            y = extractProtection(graphics, x, width, y, mouseX, mouseY, partialTick);
+        } else {
+            // 预估：可用余额、成交价、保证金、手续费
+            y = extractInfo(graphics, x, right - PAD, y, params, snapshot, lots, leverage,
+                    limit ? limitPrice() : OptionalDouble.empty(), limit);
+        }
+        if (position != null && !protectionPage) {
             Component held = Component.translatable("screen.creepercapital.trading.order.holding",
                     Component.translatable(position.side() == Side.LONG
                             ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
@@ -180,13 +261,18 @@ final class OrderPanel {
         colorButton(graphics, buyBox, Component.translatable("screen.creepercapital.trading.order.buy"), BinancePalette.UP, mouseX, mouseY);
         colorButton(graphics, sellBox, Component.translatable("screen.creepercapital.trading.order.sell"), BinancePalette.DOWN, mouseX, mouseY);
         y += BUTTON_HEIGHT + 4;
-        closeBox = new int[] {x, y, x + width, y + BUTTON_HEIGHT - 2};
         boolean canClose = position != null;
-        graphics.fill(closeBox[0], closeBox[1], closeBox[2], closeBox[3],
-                canClose && inside(closeBox, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
-        graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.order.close"),
-                (closeBox[0] + closeBox[2]) / 2, closeBox[1] + (closeBox[3] - closeBox[1] - font.lineHeight) / 2 + 1,
-                canClose ? BinancePalette.TEXT_PRIMARY : DISABLED);
+        // 有仓位时，平仓行分成「平仓」和「设止盈止损」两个按钮
+        int closeRight = canClose ? x + half : x + width;
+        closeBox = new int[] {x, y, closeRight, y + BUTTON_HEIGHT - 2};
+        protectBox = canClose ? new int[] {x + half + gap, y, x + width, y + BUTTON_HEIGHT - 2} : new int[4];
+        plainButton(graphics, closeBox, Component.translatable(limit
+                ? "screen.creepercapital.trading.order.close_limit" : "screen.creepercapital.trading.order.close"),
+                canClose, mouseX, mouseY);
+        if (canClose) {
+            plainButton(graphics, protectBox, Component.translatable("screen.creepercapital.trading.order.protect"), true,
+                    mouseX, mouseY);
+        }
         y += BUTTON_HEIGHT + 2;
 
         // 下单结果
@@ -230,6 +316,57 @@ final class OrderPanel {
         return y + ROW - 1;
     }
 
+    /** 止盈止损页：止盈价、止损价并排两个输入框；其下是触发价来源开关和只减仓开关。 */
+    private int extractProtection(GuiGraphicsExtractor graphics, int x, int width, int y, int mouseX, int mouseY,
+            float partialTick) {
+        int gap = 6;
+        int half = (width - gap) / 2;
+        triggerField(graphics, takeProfitBox, x, y, half, mouseX, mouseY, partialTick);
+        triggerField(graphics, stopLossBox, x + half + gap, y, width - half - gap, mouseX, mouseY, partialTick);
+        y += INPUT_HEIGHT + 3;
+        sourceBox =new int[] {x, y, x + half, y + STEP_BUTTON};
+        reduceBox = new int[] {x + half + gap, y, x + width, y + STEP_BUTTON};
+        boolean mark = ClientTrading.triggerSource() == TriggerSource.MARK;
+        plainButton(graphics, sourceBox, Component.translatable(mark
+                ? "screen.creepercapital.trading.order.source_mark" : "screen.creepercapital.trading.order.source_last"),
+                true, mouseX, mouseY);
+        boolean reduce = ClientTrading.reduceOnly();
+        graphics.fill(reduceBox[0], reduceBox[1], reduceBox[2], reduceBox[3],
+                inside(reduceBox, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
+        // 复选框：方框，勾选时里面填黄色
+        int boxTop = reduceBox[1] + (STEP_BUTTON - 8) / 2;
+        graphics.outline(reduceBox[0] + 3, boxTop, 8, 8, reduce ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_SECONDARY);
+        if (reduce) {
+            graphics.fill(reduceBox[0] + 5, boxTop + 2, reduceBox[0] + 9, boxTop + 6, BinancePalette.BRAND_YELLOW);
+        }
+        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.reduce_only"), reduceBox[0] + 14,
+                reduceBox[1] + (STEP_BUTTON - font.lineHeight) / 2 + 1, BinancePalette.TEXT_PRIMARY, false);
+        return y + STEP_BUTTON + 3;
+    }
+
+    private void triggerField(GuiGraphicsExtractor graphics, EditBox box, int x, int y, int width, int mouseX, int mouseY,
+            float partialTick) {
+        graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
+        graphics.outline(x, y, width, INPUT_HEIGHT, box.isFocused() ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
+        box.setWidth(width - 8);
+        box.setX(x + 4);
+        box.setY(y + 4);
+        box.extractRenderState(graphics, mouseX, mouseY, partialTick);
+    }
+
+    /** 「止盈止损」页签的文字：设了止盈止损或只减仓时末尾带一个黄点，提示这一页有设置。 */
+    private Component protectionLabel() {
+        Component label = Component.translatable("screen.creepercapital.trading.order.tab.protection");
+        boolean set = !takeProfitBox.getValue().isEmpty() || !stopLossBox.getValue().isEmpty() || ClientTrading.reduceOnly();
+        return set ? label.copy().append(Component.literal(" *").withColor(BinancePalette.BRAND_YELLOW)) : label;
+    }
+
+    private void plainButton(GuiGraphicsExtractor graphics, int[] box, Component label, boolean enabled, int mouseX, int mouseY) {
+        graphics.fill(box[0], box[1], box[2], box[3], enabled && inside(box, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
+        graphics.centeredText(font, label, (box[0] + box[2]) / 2, box[1] + (box[3] - box[1] - font.lineHeight) / 2 + 1,
+                enabled ? BinancePalette.TEXT_PRIMARY : DISABLED);
+    }
+
     private void infoRow(GuiGraphicsExtractor graphics, int x, int right, int y, String labelKey, String value) {
         graphics.text(font, Component.translatable(labelKey), x, y, BinancePalette.TEXT_SECONDARY, false);
         graphics.text(font, value, right - font.width(value), y, BinancePalette.TEXT_PRIMARY, false);
@@ -237,11 +374,14 @@ final class OrderPanel {
 
     /** 市价 / 限价页签：当前页黄字加下划线，鼠标悬停的底色变亮。 */
     private void modeTab(GuiGraphicsExtractor graphics, int[] box, String labelKey, boolean selected, int mouseX, int mouseY) {
+        modeTab(graphics, box, Component.translatable(labelKey), selected, mouseX, mouseY);
+    }
+
+    private void modeTab(GuiGraphicsExtractor graphics, int[] box, Component label, boolean selected, int mouseX, int mouseY) {
         boolean hovered = inside(box, mouseX, mouseY);
         if (hovered && !selected) {
             graphics.fill(box[0], box[1], box[2], box[3], BUTTON_BACKGROUND);
         }
-        Component label = Component.translatable(labelKey);
         graphics.text(font, label, box[0] + 6, box[1] + 2, selected ? BinancePalette.BRAND_YELLOW
                 : hovered ? BinancePalette.TEXT_PRIMARY : BinancePalette.TEXT_SECONDARY, false);
         if (selected) {
@@ -301,6 +441,26 @@ final class OrderPanel {
             ClientTrading.setLimitMode(true);
             return true;
         }
+        if (inside(estimateTab, x, y)) {
+            ClientTrading.setProtectionPage(false);
+            return true;
+        }
+        if (inside(protectionTab, x, y)) {
+            ClientTrading.setProtectionPage(true);
+            return true;
+        }
+        if (ClientTrading.protectionPage() && inside(sourceBox, x, y)) {
+            ClientTrading.toggleTriggerSource();
+            return true;
+        }
+        if (ClientTrading.protectionPage() && inside(reduceBox, x, y)) {
+            ClientTrading.setReduceOnly(!ClientTrading.reduceOnly());
+            return true;
+        }
+        if (inside(protectBox, x, y)) {
+            protect(symbol);
+            return true;
+        }
         if (inside(minus, x, y)) {
             ClientTrading.lowerLeverage(symbol);
             return true;
@@ -336,8 +496,15 @@ final class OrderPanel {
                     params.quantityDecimals()));
             return;
         }
+        OptionalDouble takeProfit = triggerPrice(takeProfitBox);
+        OptionalDouble stopLoss = triggerPrice(stopLossBox);
+        if (takeProfit.isEmpty() || stopLoss.isEmpty()) {
+            ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.invalid_trigger_input"));
+            return;
+        }
         if (!ClientTrading.limitMode()) {
-            ClientTrading.send(action, symbol, lots.getAsLong());
+            ClientTrading.sendOrder(action, symbol, lots.getAsLong(), OrderPayload.Execution.MARKET, 0,
+                    takeProfit.getAsDouble(), stopLoss.getAsDouble());
             return;
         }
         OptionalDouble price = limitPrice();
@@ -345,7 +512,54 @@ final class OrderPanel {
             ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.invalid_price_input"));
             return;
         }
-        ClientTrading.sendLimit(action, symbol, lots.getAsLong(), price.getAsDouble());
+        ClientTrading.sendOrder(action, symbol, lots.getAsLong(), OrderPayload.Execution.LIMIT, price.getAsDouble(),
+                takeProfit.getAsDouble(), stopLoss.getAsDouble());
+    }
+
+    /** 止盈 / 止损输入框里的触发价：没填是 0（不设），填了但格式不对为空。 */
+    private static OptionalDouble triggerPrice(EditBox box) {
+        String text = box.getValue().trim();
+        if (text.isEmpty()) {
+            return OptionalDouble.of(0);
+        }
+        try {
+            double price = Double.parseDouble(text);
+            return price > 0 && Double.isFinite(price) ? OptionalDouble.of(price) : OptionalDouble.empty();
+        } catch (NumberFormatException e) {
+            return OptionalDouble.empty();
+        }
+    }
+
+    /** 给现有仓位设止盈止损：数量留空就是整个仓位（固定为此刻的仓位数量），至少要填一项。 */
+    private void protect(String symbol) {
+        Position position = ClientTrading.position(symbol).orElse(null);
+        TradingParams params = ClientTrading.params(symbol).orElse(null);
+        if (position == null || params == null) {
+            return;
+        }
+        OptionalDouble takeProfit = triggerPrice(takeProfitBox);
+        OptionalDouble stopLoss = triggerPrice(stopLossBox);
+        if (takeProfit.isEmpty() || stopLoss.isEmpty()) {
+            ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.invalid_trigger_input"));
+            return;
+        }
+        if (takeProfit.getAsDouble() == 0 && stopLoss.getAsDouble() == 0) {
+            ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.need_trigger_input"));
+            return;
+        }
+        long lots = position.lots();
+        String text = quantityBox.getValue().trim();
+        if (!text.isEmpty()) {
+            OptionalLong parsed = Quantities.parseLots(text, params.quantityDecimals());
+            if (parsed.isEmpty()) {
+                ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.invalid_quantity_input",
+                        params.quantityDecimals()));
+                return;
+            }
+            lots = parsed.getAsLong();
+        }
+        ClientTrading.sendOrder(OrderPayload.Action.PROTECT, symbol, lots, OrderPayload.Execution.MARKET, 0,
+                takeProfit.getAsDouble(), stopLoss.getAsDouble());
     }
 
     /** 市价平仓：数量留空是全平，填了就平这么多。 */
@@ -366,7 +580,17 @@ final class OrderPanel {
             }
             lots = parsed.getAsLong();
         }
-        ClientTrading.send(OrderPayload.Action.CLOSE, symbol, lots);
+        if (!ClientTrading.limitMode()) {
+            ClientTrading.sendOrder(OrderPayload.Action.CLOSE, symbol, lots, OrderPayload.Execution.MARKET, 0, 0, 0);
+            return;
+        }
+        // 限价平仓就是只减仓限价单：价格穿越委托价时按委托价平仓
+        OptionalDouble price = limitPrice();
+        if (price.isEmpty()) {
+            ClientTrading.showLocalError(Component.translatable("message.creepercapital.order.invalid_price_input"));
+            return;
+        }
+        ClientTrading.sendOrder(OrderPayload.Action.CLOSE, symbol, lots, OrderPayload.Execution.LIMIT, price.getAsDouble(), 0, 0);
     }
 
     private static String underlyingName(String symbol) {

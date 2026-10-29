@@ -32,8 +32,8 @@ final class TradeTables {
     static final int HEADER_HEIGHT = 12;
     private static final int[] POSITION_WEIGHTS = {21, 10, 12, 12, 12, 22, 11};
     private static final int[] TRADE_WEIGHTS = {19, 14, 9, 13, 11, 12, 16};
-    private static final int[] OPEN_ORDER_WEIGHTS = {15, 14, 9, 8, 13, 11, 16, 8};
-    private static final int[] ORDER_HISTORY_WEIGHTS = {14, 13, 8, 7, 11, 11, 10, 11, 15};
+    private static final int[] OPEN_ORDER_WEIGHTS = {14, 13, 8, 13, 13, 11, 12, 8};
+    private static final int[] ORDER_HISTORY_WEIGHTS = {15, 13, 8, 12, 10, 10, 9, 9, 13};
     private static final int BUTTON_BACKGROUND = 0xFF2B3139;
     private static final int BUTTON_HOVER = 0xFF3C4552;
 
@@ -134,7 +134,8 @@ final class TradeTables {
             orderCells(graphics, columns, y, order, order.createdSeconds());
             cell(graphics, columns[4], y, MarketFormat.price(order.price()), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[5], y, Quantities.format(order.lots(), decimalsOf(order)), BinancePalette.TEXT_PRIMARY);
-            cell(graphics, columns[6], y, order.frozen().toDisplayString(), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[6], y, order.frozen().isPositive() ? order.frozen().toDisplayString() : "--",
+                    BinancePalette.TEXT_PRIMARY);
             Component label = Component.translatable("screen.creepercapital.trading.orders.cancel");
             int[] box = {columns[7], y, columns[7] + font.width(label) + 8, y + ROW_HEIGHT - 1};
             boolean hovered = mouseX >= box[0] && mouseX < box[2] && mouseY >= box[1] && mouseY < box[3];
@@ -163,21 +164,34 @@ final class TradeTables {
             cell(graphics, columns[5], y, filled ? MarketFormat.price(order.fillPrice()) : "--", BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[6], y, Quantities.format(order.lots(), decimalsOf(order)), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[7], y, filled ? order.fee().toDisplayString() : "--", BinancePalette.TEXT_PRIMARY);
-            String statusKey = filled ? "filled" : order.cancelReason() == CancelReason.FILL_REJECTED ? "fill_rejected" : "cancelled";
+            String statusKey = filled ? "filled" : order.cancelReason() == CancelReason.FILL_REJECTED ? "fill_rejected"
+                    : order.cancelReason() == CancelReason.POSITION_CLOSED ? "position_closed" : "cancelled";
             cell(graphics, columns[8], y, Component.translatable("screen.creepercapital.trading.order_status." + statusKey).getString(),
                     filled ? BinancePalette.UP : BinancePalette.TEXT_SECONDARY);
         }
     }
 
-    /** 委托行前四列：时间、合约、方向（开多绿 / 开空红）、类型。 */
+    /**
+     * 委托行前四列：时间、合约、方向、类型。开仓委托的方向是开多绿 / 开空红；平仓类委托（只减仓、止盈、止损）是平多 / 平空，
+     * 颜色跟随所平仓位的方向。类型列：限价、限价只减仓、止盈 / 止损带触发价类型（最新价 / 标记价）。
+     */
     private void orderCells(GuiGraphicsExtractor graphics, int[] columns, int y, Order order, long marketSeconds) {
         cell(graphics, columns[0], y, MarketFormat.marketTime(new MarketTime(marketSeconds)), BinancePalette.TEXT_SECONDARY);
         cell(graphics, columns[1], y, order.symbol(), BinancePalette.TEXT_PRIMARY);
-        cell(graphics, columns[2], y, Component.translatable("screen.creepercapital.trading.trade_side.open_"
+        String kind = order.reduceOnly() ? "close_" : "open_";
+        cell(graphics, columns[2], y, Component.translatable("screen.creepercapital.trading.trade_side." + kind
                 + order.side().name().toLowerCase(Locale.ROOT)).getString(),
                 order.side() == Side.LONG ? BinancePalette.UP : BinancePalette.DOWN);
-        cell(graphics, columns[3], y, Component.translatable("screen.creepercapital.trading.order_type."
-                + order.type().name().toLowerCase(Locale.ROOT)).getString(), BinancePalette.TEXT_PRIMARY);
+        cell(graphics, columns[3], y, typeLabel(order), BinancePalette.TEXT_PRIMARY);
+    }
+
+    static String typeLabel(Order order) {
+        if (order.type().isTrigger()) {
+            return Component.translatable("screen.creepercapital.trading.order_type." + order.type().name().toLowerCase(Locale.ROOT)
+                    + "_" + order.triggerSource().name().toLowerCase(Locale.ROOT)).getString();
+        }
+        return Component.translatable("screen.creepercapital.trading.order_type."
+                + (order.reduceOnly() ? "limit_reduce" : "limit")).getString();
     }
 
     private static int decimalsOf(Order order) {

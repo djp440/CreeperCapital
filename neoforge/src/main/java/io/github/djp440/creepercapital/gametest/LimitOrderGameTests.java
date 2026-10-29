@@ -115,7 +115,7 @@ final class LimitOrderGameTests {
             ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, lots(), 0,
                     OrderPayload.Execution.LIMIT, price));
             helper.assertValueEqual(TradingGameTests.last(MockClient.received(player, OrderResultPayload.class)).code(),
-                    "limit_close_unsupported", "限价平仓留给 #15");
+                    "no_position", "没有仓位时限价平仓被拒绝（限价平仓由 #15 接管）");
 
             ServerTrading.handleCancel(player, new CancelOrderPayload(999_999));
             helper.assertValueEqual(TradingGameTests.last(MockClient.received(player, OrderResultPayload.class)).code(),
@@ -179,7 +179,7 @@ final class LimitOrderGameTests {
         });
     }
 
-    private static void cleanUpOffline(GameTestHelper helper, UUID id) {
+    static void cleanUpOffline(GameTestHelper helper, UUID id) {
         TradingBook book = ServerTrading.book();
         for (Position position : book.positions(id)) {
             book.close(id, ServerMarket.spec(position.symbol()), ServerMarket.snapshot(position.symbol()), position.lots());

@@ -12,6 +12,10 @@ public sealed interface TradeResult {
     record Placed(Order order) implements TradeResult {
     }
 
+    /** 给已有仓位补设的止盈止损委托已挂出（最多一张止盈、一张止损），不冻结资金。 */
+    record ProtectionPlaced(java.util.List<Order> orders) implements TradeResult {
+    }
+
     /**
      * 被拒绝，账户和池子都没有变化。
      *
@@ -40,7 +44,9 @@ public sealed interface TradeResult {
         /** 成交价不是正数（价格已低于半个点差）。 */
         INVALID_PRICE,
         /** 挂着的委托已达上限；参数：上限。 */
-        TOO_MANY_ORDERS
+        TOO_MANY_ORDERS,
+        /** 止盈止损的触发价不合法（不是正数，或按当前价格会立即触发：多仓止盈须高于、止损须低于参考价，空仓相反）；参数：参考价。 */
+        INVALID_TRIGGER_PRICE
     }
 
     static TradeResult reject(Reason reason, String... args) {

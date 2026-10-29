@@ -39,7 +39,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，表格区切到当前委托页。 */
         OPEN_ORDERS(minecraft -> TradingScreen.openForTrading("OPEN_ORDERS", "")),
         /** 交易界面，表格区切到历史委托页。 */
-        ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", ""));
+        ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", "")),
+        /** 交易界面，下单面板切到「止盈止损」页，止盈价填最新价的 105%、止损价填 97%，数量填 2，表格区在资产页。 */
+        PROTECTION(minecraft -> TradingScreen.openForProtection("ASSETS", "2", protectionPrice(1.05), protectionPrice(0.97)));
 
         private final Consumer<Minecraft> opener;
 
@@ -49,6 +51,11 @@ public record ScreenshotStep(String id, String title, String expected, View view
 
         void open(Minecraft minecraft) {
             opener.accept(minecraft);
+        }
+
+        private static String protectionPrice(double factor) {
+            return ClientMarket.selectedSymbol().flatMap(ClientMarket::snapshot)
+                    .map(snapshot -> String.format(java.util.Locale.ROOT, "%.2f", snapshot.lastPrice() * factor)).orElse("");
         }
 
         private static String limitPrice() {

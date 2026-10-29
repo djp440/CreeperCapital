@@ -23,6 +23,7 @@ import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderEvent;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
+import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
@@ -125,11 +126,9 @@ public final class ServerTrading {
         }
         ContractSpec spec = ServerMarket.spec(order.symbol());
         UUID id = player.getUUID();
-        if (order.execution() == OrderPayload.Execution.LIMIT && order.action() == OrderPayload.Action.CLOSE) {
-            // 限价平仓（止盈）属于 #15，现在只支持限价开仓
-            return rejected("limit_close_unsupported");
-        }
         TradeResult result = submit(id, spec, order);
+        // 玩家平仓可能让附带的止盈止损失效，记录下来（离线汇总在 #19 接）
+        logEvents(book().orders().takeEvents());
         if (result instanceof TradeResult.Rejected rejected) {
             LOGGER.debug("拒绝 {} 的委托 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(), rejected.args());
             return rejected(rejected.reason().name().toLowerCase(Locale.ROOT), rejected.args().toArray(String[]::new));
@@ -142,6 +141,15 @@ public final class ServerTrading {
             return new OrderResultPayload(true, "limit_placed", List.of(resting.symbol(),
                     formatQuantity(resting.lots(), spec.quantityDecimals()), formatPrice(resting.price())));
         }
+        if (result instanceof TradeResult.ProtectionPlaced protection) {
+            List<Order> created = protection.orders();
+            created.forEach(o -> LOGGER.info("{} #{} {} {} 触发价 {}（{}）数量 {}", o.type(), o.id(),
+                    player.getGameProfile().name(), o.symbol(), o.price(), o.triggerSource(),
+                    formatQuantity(o.lots(), spec.quantityDecimals())));
+            return new OrderResultPayload(true, "protection_placed", List.of(order.symbol(),
+                    order.takeProfit() != 0 ? formatPrice(order.takeProfit()) : "--",
+                    order.stopLoss() != 0 ? formatPrice(order.stopLoss()) : "--"));
+        }
         PlayerTrade trade = ((TradeResult.Filled) result).trade();
         LOGGER.info("玩家成交 #{} {} {} {} {} 数量 {} 价格 {} 手续费 {} 已实现盈亏 {}", trade.id(), player.getGameProfile().name(),
                 trade.kind(), trade.side(), trade.symbol(), formatQuantity(trade.lots(), spec.quantityDecimals()),
@@ -152,13 +160,36 @@ public final class ServerTrading {
     private static TradeResult submit(UUID id, ContractSpec spec, OrderPayload order) {
         MarketSnapshot snapshot = ServerMarket.snapshot(order.symbol());
         Side side = order.action() == OrderPayload.Action.OPEN_SHORT ? Side.SHORT : Side.LONG;
-        if (order.execution() == OrderPayload.Execution.LIMIT) {
-            return book().orders().placeLimit(id, spec, snapshot, side, order.lots(), order.leverage(), order.price());
+        OrderPayload.Action action = order.action();
+        boolean limit = order.execution() == OrderPayload.Execution.LIMIT;
+        if (order.reduceOnly() && (action == OrderPayload.Action.OPEN_LONG || action == OrderPayload.Action.OPEN_SHORT)) {
+            // 开多 / 开空是买入 / 卖出：带只减仓就是缩减反向的仓位，没有可缩减的仓位就拒绝（币安同样拒绝），绝不开仓
+            Position position = book().position(id, spec.symbol()).orElse(null);
+            if (position == null || position.side() == side) {
+                return TradeResult.reject(TradeResult.Reason.NO_POSITION);
+            }
+            action = OrderPayload.Action.CLOSE;
         }
-        return switch (order.action()) {
-            case OPEN_LONG, OPEN_SHORT -> book().open(id, spec, snapshot, side, order.lots(), order.leverage());
-            case CLOSE -> book().close(id, spec, snapshot, order.lots());
+        return switch (action) {
+            case OPEN_LONG, OPEN_SHORT -> limit
+                    ? book().orders().placeLimit(id, spec, snapshot, side, order.lots(), order.leverage(), order.price(),
+                            order.protection())
+                    : book().orders().openWithProtection(id, spec, snapshot, side, order.lots(), order.leverage(),
+                            order.protection());
+            case CLOSE -> limit
+                    ? book().orders().placeReduceOnlyLimit(id, spec, snapshot, order.lots(), order.price())
+                    : order.reduceOnly() ? book().closeUpTo(id, spec, snapshot, order.lots())
+                            : book().close(id, spec, snapshot, order.lots());
+            case PROTECT -> book().orders().placeProtection(id, spec, snapshot, order.lots(), order.protection());
         };
+    }
+
+    private static void logEvents(List<OrderEvent> events) {
+        for (OrderEvent event : events) {
+            LOGGER.info("委托 #{} {}：{} {} {} {} 数量 {} 价格 {} 金额 {} 盈亏 {} 原因 {}", event.orderId(), event.kind(),
+                    event.player(), event.type(), event.side(), event.symbol(), event.lots(), event.price(), event.amount(),
+                    event.realizedPnl(), event.cancelReason());
+        }
     }
 
     private static OrderResultPayload filled(PlayerTrade trade, ContractSpec spec) {
@@ -183,7 +214,10 @@ public final class ServerTrading {
             return;
         }
         LOGGER.info("玩家撤单 #{} {} 释放 {}", event.get().orderId(), player.getGameProfile().name(), event.get().amount());
-        ModPayloads.sendTo(player, describe(event.get()));
+        OrderResultPayload notice = describe(event.get());
+        if (notice != null) {
+            ModPayloads.sendTo(player, notice);
+        }
         markDirty();
         sendState(player);
         ModPayloads.sendTo(player, new AccountPayload(assets(id)));
@@ -197,14 +231,25 @@ public final class ServerTrading {
         return ServerMarket.snapshots().stream().mapToLong(s -> s.time().totalSeconds()).findFirst().orElse(0);
     }
 
-    /** 委托成交 / 撤销事件对应的玩家提示。 */
-    private static OrderResultPayload describe(OrderEvent event) {
+    /**
+     * 委托事件对应的玩家提示；触发（紧接着就是成交）和仓位平掉后的自动失效不单独提示，免得盖掉成交那一条，
+     * 它们在历史委托里看得到。
+     */
+    private static @Nullable OrderResultPayload describe(OrderEvent event) {
+        if (event.kind() == OrderEvent.Kind.TRIGGERED || event.cancelReason() == CancelReason.POSITION_CLOSED) {
+            return null;
+        }
         int decimals = ServerMarket.symbols().contains(event.symbol())
                 ? ServerMarket.spec(event.symbol()).quantityDecimals() : 0;
         List<String> args = List.of(event.symbol(), formatQuantity(event.lots(), decimals), formatPrice(event.price()),
-                event.amount().toDisplayString());
+                event.amount().toDisplayString(), event.realizedPnl().toDisplayString());
         if (event.kind() == OrderEvent.Kind.FILLED) {
-            return new OrderResultPayload(true, "limit_filled", args);
+            String code = switch (event.type()) {
+                case TAKE_PROFIT -> "take_profit_filled";
+                case STOP_LOSS -> "stop_loss_filled";
+                case LIMIT -> "limit_filled";
+            };
+            return new OrderResultPayload(true, code, args);
         }
         return new OrderResultPayload(event.cancelReason() == CancelReason.USER,
                 event.cancelReason() == CancelReason.USER ? "order_cancelled" : "order_cancelled_rejected", args);
@@ -235,15 +280,14 @@ public final class ServerTrading {
         }
         Set<UUID> touched = new LinkedHashSet<>();
         for (OrderEvent event : events) {
-            LOGGER.info("委托 #{} {}：{} {} {} 数量 {} 价格 {} 金额 {} 原因 {}", event.orderId(), event.kind(),
-                    event.player(), event.side(), event.symbol(), event.lots(), event.price(), event.amount(),
-                    event.cancelReason());
             touched.add(event.player());
             ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
-            if (owner != null) {
-                ModPayloads.sendTo(owner, describe(event));
+            OrderResultPayload notice = describe(event);
+            if (owner != null && notice != null) {
+                ModPayloads.sendTo(owner, notice);
             }
         }
+        logEvents(events);
         if (!events.isEmpty()) {
             markDirty();
         }
