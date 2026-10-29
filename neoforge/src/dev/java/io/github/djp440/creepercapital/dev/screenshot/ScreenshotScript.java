@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import io.github.djp440.creepercapital.client.ClientKlines;
+import io.github.djp440.creepercapital.client.ClientMarket;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
 import net.minecraft.client.Minecraft;
@@ -21,7 +22,7 @@ final class ScreenshotScript {
                             + "再往下是 K 线图，刚进世界时只有寥寥几根 1m K 线；界面无错位和乱码。",
                     View.TRADING),
             new ScreenshotStep("02", "交易界面：行情栏九项数值",
-                    "行情栏左侧为 DIAMONDCRP / 永续，其后依次为最新价格（随行情步变色，涨绿跌红）、标记价格、指数价格、"
+                    "行情栏左侧为 DIAMONDCRP（右边带下拉小三角）/ 永续，其后依次为最新价格（随行情步变色，涨绿跌红）、标记价格、指数价格、"
                             + "资金费率 / 倒计时（黄色，形如「0.0100% / 07:59:54」，倒计时按市场时间每步少 6 秒）、市场时间，"
                             + "以及 24h 涨跌（涨绿跌红，形如「+0.00 +0.00%」）、24h 最高、24h 最低、24h 成交量；"
                             + "屏幕放不下时折成两行；三种价格彼此接近但通常不完全相同；与 01 相比各数值已刷新；"
@@ -50,7 +51,21 @@ final class ScreenshotScript {
                             + "不足 7 根所以没有均线；时间轴标注为「第 N 日」；"
                             + "成交量柱中前 5 根高度相近（各是一整天的成交量），最右一根很矮（当天才刚开始）；无错位和乱码。",
                     View.TRADING,
-                    select(CandlePeriod.D1)));
+                    select(CandlePeriod.D1)),
+            new ScreenshotStep("07", "合约下拉列表（DIAMONDCRP 选中，1h 周期）",
+                    "行情栏最左侧的交易代码 DIAMONDCRP 右边有一个向下的小三角，且整块交易代码区域底色变亮（下拉已展开）；"
+                            + "其下挂出一个带边框的列表，两项：DIAMONDCRP（黄字，表示当前合约）和 GUNPOWDERCRP（灰字）；"
+                            + "列表盖在行情栏第二行最左边（遮住「24h 最高」）之上，文字清晰、无错位；"
+                            + "图表是 DIAMONDCRP 的 1h K 线，价格轴在 1000 附近。",
+                    View.CONTRACT_MENU,
+                    select(CandlePeriod.H1)),
+            new ScreenshotStep("08", "切换到 GUNPOWDERCRP（1h 周期）",
+                    "行情栏左侧变为 GUNPOWDERCRP / 永续，三种价格、资金费率、24h 涨跌/最高/最低/成交量都是火药自己的数值"
+                            + "（价格在 100 附近，明显不同于 DIAMONDCRP 的 1000 附近）；下拉列表已收起；"
+                            + "K 线图是火药自己的 1h K 线，价格轴在 100 附近，波动明显比 DIAMONDCRP 大（图上 K 线的高低差更大）；"
+                            + "无错位和乱码。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")));
 
     private ScreenshotScript() {
     }
@@ -62,5 +77,9 @@ final class ScreenshotScript {
 
     private static Consumer<Minecraft> select(CandlePeriod period) {
         return minecraft -> ClientKlines.select(period);
+    }
+
+    private static Consumer<Minecraft> selectContract(String symbol) {
+        return minecraft -> ClientMarket.select(symbol);
     }
 }

@@ -14,7 +14,7 @@ import io.github.djp440.creepercapital.network.KlineRequestPayload;
 import net.neoforged.neoforge.client.network.ClientPacketDistributor;
 
 /**
- * 客户端缓存的当前周期 K 线：打开界面、切换周期时向服务端拉一次历史，之后每个行情步用快照增量更新当前这一根。
+ * 客户端缓存的当前合约、当前周期的 K 线：打开界面、切换合约或周期时向服务端拉一次历史，之后每个行情步用快照增量更新当前这一根。
  * <p>
  * 增量更新与服务端聚合用的是同一份核心逻辑（{@link Klines#advance}），所以结果完全一致。
  * 行情步不连续（开发命令快进、丢包）时增量更新会漏数据，这里发现后重新拉取。
@@ -48,6 +48,13 @@ public final class ClientKlines {
         request();
     }
 
+    /** 切换了合约（含第一个合约到达）：旧合约的 K 线立刻丢弃，界面显示加载中，直到新合约的历史到达。 */
+    static void onContractSelected() {
+        candles = null;
+        lastStep = -1;
+        request();
+    }
+
     /** 切换周期：旧周期的 K 线立刻丢弃，界面显示加载中，直到新周期的历史到达。 */
     public static void select(CandlePeriod period) {
         if (period == selected && candles != null) {
@@ -59,8 +66,8 @@ public final class ClientKlines {
     }
 
     static void accept(KlineHistoryPayload payload) {
-        // 切换过周期后，上一个周期的迟到响应直接丢弃
-        if (payload.period() != selected) {
+        // 切换过合约或周期后，上一个合约、上一个周期的迟到响应直接丢弃
+        if (payload.period() != selected || !ClientMarket.isSelected(payload.symbol())) {
             return;
         }
         candles = new ArrayList<>(payload.candles());
@@ -89,6 +96,7 @@ public final class ClientKlines {
     }
 
     private static void request() {
-        ClientPacketDistributor.sendToServer(new KlineRequestPayload(selected));
+        ClientMarket.selectedSymbol().ifPresent(symbol ->
+                ClientPacketDistributor.sendToServer(new KlineRequestPayload(symbol, selected)));
     }
 }

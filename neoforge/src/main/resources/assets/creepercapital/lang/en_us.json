@@ -20,5 +20,7 @@
   "screen.creepercapital.trading.kline.axis_day": "D%s",
   "commands.creepercapital.market.paused": "Market paused",
   "commands.creepercapital.market.resumed": "Market resumed",
-  "commands.creepercapital.market.advanced": "Market advanced %s steps"
+  "commands.creepercapital.market.advanced": "Market advanced %s steps",
+  "commands.creepercapital.market.jump": "%s will jump %s%% on the next market step",
+  "commands.creepercapital.market.jump.unknown": "No such contract: %s"
 }
