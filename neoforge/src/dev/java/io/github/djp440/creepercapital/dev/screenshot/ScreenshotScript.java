@@ -20,7 +20,7 @@ import net.neoforged.neoforge.common.NeoForge;
 
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
- * 01~27 用缺省的绿涨红跌；28~37 切到红涨绿跌把各面板再截一遍，38 切回绿涨红跌。
+ * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -287,7 +287,27 @@ final class ScreenshotScript {
                     "「资金费记录」页签为黄字加下划线；方向列多为红字、空为绿字；资金费金额收到（正号）为红字、支付（负号）为绿字；"
                             + "未收付列仍为灰色 \"--\"；列不重叠、无乱码。",
                     View.FUNDING),
-            new ScreenshotStep("38", "切回绿涨红跌（3 级验收）",
+            new ScreenshotStep("38", "红涨绿跌：全仓 / 杠杆与 ADL 指示灯（仓位页，3 级验收）",
+                    "仍是红涨绿跌；表格区在「仓位」页：GUNPOWDERCRP 一行模式列是「全仓 5x」、DIAMONDCRP 一行是「逐仓 10x」"
+                            + "（表格较窄省掉模式列时看下单面板的仓位提示），多头的合约、数量与盈利的未实现盈亏、收益率都是红字（多 = 涨色，盈利 = 涨色）；"
+                            + "ADL 列的小柱仍是品牌黄（亮）与深灰（灭），不随配色变，各行灯数与盈利率 x 杠杆的排序一致；"
+                            + "预估强平价仍是黄字、保证金率不受配色影响；列不重叠、ADL 列不被截断、无乱码。",
+                    View.POSITIONS),
+            new ScreenshotStep("39", "红涨绿跌：强平记录（多头被强平，3 级验收）",
+                    "「成交历史」页签为黄字加下划线；刚用 /creeper dev market jump DIAMONDCRP -15 让价格在下一个行情步下跌，"
+                            + "DIAMONDCRP 逐仓 10x 多头（1.500）越过强平价（约 -9.5%）被强平；最新一行在最上面：合约 DIAMONDCRP，方向列是黄字「强平多」"
+                            + "（强平记录用品牌黄，不随涨跌色变），成交价是下跌后的标记价格，数量 1.500；穿仓所以手续费（清算费）显示 0.00，"
+                            + "已实现盈亏是很大的负数，在红涨绿跌下按跌色显示为绿字、带负号；下一行是步骤 27 的开多（红字）；"
+                            + "右侧下单面板底部结果行是红字「DIAMONDCRP 被强平」；列不重叠、无乱码。",
+                    View.TRADES,
+                    liquidateDiamondLong()),
+            new ScreenshotStep("40", "红涨绿跌：盘口（DIAMONDCRP，3 级验收）",
+                    "盘口页换成 DIAMONDCRP 自己的深度（价格在 1000 附近）：卖盘（上半）绿字、绿色深度条，买盘（下半）红字、红色深度条；"
+                            + "中间一行最新价格按最近一个行情步的涨跌着色（涨红跌绿，持平白字，与行情栏最新价格同色），右侧灰字是标记价格；表格区回到资产页；"
+                            + "每档数量相同（约 0.46~0.5 个），累计逐档递增，相邻档价差很小（约 0.05）；窄屏时盘口并进图表卡片；无重叠、截断和乱码。",
+                    View.ORDER_BOOK,
+                    selectContract("DIAMONDCRP")),
+            new ScreenshotStep("41", "切回绿涨红跌（3 级验收）",
                     "刚把涨跌色切回「绿涨红跌」：行情栏右端的切换按钮变为绿色块在前、红色块在后，文字「绿涨红跌」；"
                             + "K 线阳线绿、阴线红，盘口卖盘红、买盘绿，下单面板「开多」绿、「开空」红，与 01~27 的配色一致；"
                             + "切换立即生效，不需要重开界面；无重叠、截断和乱码。",
@@ -454,6 +474,11 @@ final class ScreenshotScript {
                     .forEach(order -> ClientTrading.cancel(order.id()));
             minecraft.player.connection.sendCommand("creeper dev market jump DIAMONDCRP 15");
         };
+    }
+
+    /** 让 DIAMONDCRP 在下一个行情步下跌 15%，步骤 27 开的逐仓 10x 多头越过强平价（约 -9.5%）被强平。 */
+    private static Consumer<Minecraft> liquidateDiamondLong() {
+        return minecraft -> minecraft.player.connection.sendCommand("creeper dev market jump DIAMONDCRP -15");
     }
 
     /**
