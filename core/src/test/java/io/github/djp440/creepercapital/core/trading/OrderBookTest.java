@@ -204,21 +204,64 @@ class OrderBookTest {
     }
 
     @Test
-    @DisplayName("滑点：按数量吃单的均价高于委托价就不算穿越，挂着；委托价够高才按曲线均价成交（taker）")
-    void slippageDecidesWhetherOrderCrosses() {
+    @DisplayName("滑点：第一档（卖一）穿越委托价就成交；下单即成交的价格不比委托价差，委托价够高才按曲线均价成交（taker）")
+    void bestLevelDecidesWhetherOrderCrosses() {
         deposit("1000");
         MarketSnapshot at = snapshot(DEEP_DIAMOND, 1000);
         // 卖一 1000.25；2.000 个 = 4 档（每档 500 手），相邻档差约 0.0526，均价约 1000.33
         double average = TradingBook.fillPrice(DEEP_DIAMOND, at, Side.LONG, TradeKind.OPEN, 2000);
         assertTrue(average > 1000.30 && average < 1000.40, "均价应约 1000.33：" + average);
 
-        // 委托价 1000.30 高于卖一但低于均价：吃不下这么多，挂着不成交
-        TradeResult resting = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.30);
-        assertInstanceOf(TradeResult.Placed.class, resting);
+        // 委托价 1000.30 高于卖一但低于均价：第一档已穿越，立即成交，但成交价封顶在委托价（不比限价差）
+        TradeResult capped = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.30);
+        assertEquals(1000.30, assertInstanceOf(TradeResult.Filled.class, capped).trade().price());
 
         // 委托价 1000.5 覆盖均价：按曲线均价成交，和同数量市价单同一个成交价
         TradeResult taken = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.5);
         assertEquals(average, assertInstanceOf(TradeResult.Filled.class, taken).trade().price());
+
+        // 委托价 1000.2 低于卖一：挂着
+        TradeResult resting = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.20);
+        assertInstanceOf(TradeResult.Placed.class, resting);
+    }
+
+    @Test
+    @DisplayName("滑点合约：卖一低于委托价就成交，不看整单均价（火药 0.3% 滑点，1 万 CRP 买入限价 99.00，最新价 98.95）")
+    void restingBuyFillsOnceBestAskCrosses() {
+        ContractSpec deep = ContractSpec.defaults().get(1); // 火药：点差 0.05、0 位精度、滑点 0.3%
+        deposit("100000");
+        // 最新价 100 时挂：卖一 100.025 高于 99，挂着。101 手约 1 万 CRP
+        Order order = placed(orders.placeLimit(ALICE, deep, snapshot(deep, 100), Side.LONG, 101, 10, 99.00));
+
+        // 最新价 98.95：卖一 98.975 已低于委托价；整单均价约 99.27 高于 99，但只看卖一就该成交
+        List<OrderEvent> events = orders.onSnapshot(deep, snapshot(deep, 98.95, 120));
+
+        assertEquals(1, events.size());
+        assertEquals(OrderEvent.Kind.FILLED, events.get(0).kind());
+        assertEquals(order.id(), events.get(0).orderId());
+        assertEquals(99.00, events.get(0).price());
+        assertEquals(99.00, book.position(ALICE, "GUNPOWDERCRP").orElseThrow().entryPrice());
+    }
+
+    @Test
+    @DisplayName("滑点合约：卖出限价同理，买一高于委托价就成交；只减仓限价单也按第一档判断")
+    void sellAndReduceOnlyUseBestLevel() {
+        ContractSpec deep = ContractSpec.defaults().get(1);
+        deposit("100000");
+        Order sell = placed(orders.placeLimit(ALICE, deep, snapshot(deep, 100), Side.SHORT, 101, 10, 101.00));
+        // 买一 = 最新价 − 0.025：最新价 101.05 时买一 101.025 ≥ 101，整单均价约 100.7 < 101，仍应成交
+        List<OrderEvent> events = orders.onSnapshot(deep, snapshot(deep, 101.05, 120));
+        assertEquals(1, events.size());
+        assertEquals(sell.id(), events.get(0).orderId());
+        assertEquals(OrderEvent.Kind.FILLED, events.get(0).kind());
+
+        // 空仓的只减仓限价买单（买入平空）：挂在 100.00，卖一随最新价 99.95 降到 99.975 ≤ 100 就成交
+        Order close = placed(orders.placeReduceOnlyLimit(ALICE, deep, snapshot(deep, 101.05, 121), 101, 100.00));
+        List<OrderEvent> closed = orders.onSnapshot(deep, snapshot(deep, 99.95, 122));
+        assertEquals(1, closed.size());
+        assertEquals(close.id(), closed.get(0).orderId());
+        assertEquals(OrderEvent.Kind.FILLED, closed.get(0).kind());
+        assertTrue(book.position(ALICE, "GUNPOWDERCRP").isEmpty());
     }
 
     @Test

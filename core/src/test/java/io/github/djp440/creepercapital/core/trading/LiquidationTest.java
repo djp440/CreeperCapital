@@ -347,10 +347,11 @@ class LiquidationTest {
     }
 
     @Test
-    @DisplayName("全仓强平撤销全部挂单（冻结资金本来就计入全仓钱包），一并结算")
-    void crossLiquidationCancelsAllOrders() {
+    @DisplayName("全仓强平撤销全仓合约的挂单（冻结资金本来就计入全仓钱包），一并结算")
+    void crossLiquidationCancelsCrossScopeOrders() {
         deposit("1000");
         openCross(DIAMOND, Side.LONG, 2000, 10, 1000);
+        book.setMarginMode(ALICE, "GUNPOWDERCRP", MarginMode.CROSS);
         book.orders().placeLimit(ALICE, GUNPOWDER, snapshot(GUNPOWDER, 100), Side.LONG, 10, 10, 50);
 
         LiquidationEvent event = check(400, 100).get(0);
@@ -362,6 +363,27 @@ class LiquidationTest {
         assertEquals(Money.parse("201.50025"), event.shortfall());
         assertEquals(Money.ZERO, accounts.balance(ALICE));
         assertEquals(Money.ZERO, book.orders().frozen(ALICE));
+    }
+
+    @Test
+    @DisplayName("全仓强平不动逐仓合约的挂单：它冻结的保证金不是全仓抵押，不被没收，挂单照旧")
+    void crossLiquidationLeavesIsolatedOrdersAlone() {
+        deposit("1000");
+        openCross(DIAMOND, Side.LONG, 2000, 10, 1000);
+        // 火药是逐仓（缺省）：10 手在 50 挂买单，冻结 50 + 0.1 = 50.1，可用余额 798.94975 − 50.1 = 748.84975
+        Order resting = ((TradeResult.Placed) book.orders().placeLimit(ALICE, GUNPOWDER, snapshot(GUNPOWDER, 100),
+                Side.LONG, 10, 10, 50)).order();
+
+        LiquidationEvent event = check(400, 100).get(0);
+
+        // 全仓抵押 = 钻石保证金 200.05 + 可用余额 748.84975 = 948.89975，不含逐仓挂单的 50.1；穿仓 1200.5 − 948.89975 = 251.60025
+        assertEquals(MarginMode.CROSS, event.mode());
+        assertTrue(event.cancelledOrders().isEmpty());
+        assertEquals(Money.parse("948.89975"), event.collateralLost());
+        assertEquals(Money.parse("251.60025"), event.shortfall());
+        assertEquals(List.of(resting.id()), book.orders().open(ALICE).stream().map(Order::id).toList());
+        assertEquals(Money.parse("50.1"), book.orders().frozen(ALICE));
+        assertEquals(Money.ZERO, accounts.balance(ALICE));
     }
 
     // ---- 仓位页的预估强平价与实际触发一致 ----

@@ -218,6 +218,27 @@ class CrossMarginTest {
         filled(book.open(ALICE, GUNPOWDER, snapshot(GUNPOWDER, 100), Side.LONG, 5, 1, marks(900, 100)));
     }
 
+    @Test
+    @DisplayName("限价挂单冻结的资金也和全仓浮亏之后的可用余额比较，不够就拒单，不留下成交时才被拒的委托")
+    void restingLimitOrderChecksAvailableBalanceAfterCrossLosses() {
+        deposit("1000");
+        book.setMarginMode(ALICE, "DIAMONDCRP", MarginMode.CROSS);
+        openDiamond(Side.LONG, 2000, 10, 1000);
+
+        // 标记价格 900 时可用 598.44975（钱包里还有 798.94975）。火药 70 个、10 倍杠杆、委托价 90（最新价 100，挂着）：
+        // 名义价值 6300，保证金 630，maker 手续费 1.26，要冻结 631.26 > 598.44975
+        TradeResult.Rejected rejection = rejected(book.orders().placeLimit(ALICE, GUNPOWDER, snapshot(GUNPOWDER, 100),
+                Side.LONG, 70, 10, 90, Protection.NONE, marks(900, 100)));
+
+        assertEquals(TradeResult.Reason.INSUFFICIENT_BALANCE, rejection.reason());
+        assertEquals(List.of("631.26", "598.44975"), rejection.args());
+        assertTrue(book.orders().open(ALICE).isEmpty());
+        assertEquals(Money.parse("798.94975"), accounts.balance(ALICE));
+        // 60 个：保证金 540 + 手续费 1.08 = 541.08 ≤ 598.44975，可以挂
+        assertInstanceOf(TradeResult.Placed.class, book.orders().placeLimit(ALICE, GUNPOWDER,
+                snapshot(GUNPOWDER, 100), Side.LONG, 60, 10, 90, Protection.NONE, marks(900, 100)));
+    }
+
     // ---- 分档的杠杆上限 ----
 
     @Test

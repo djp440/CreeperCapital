@@ -8,6 +8,7 @@ import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarginTiers;
 
 /**
@@ -45,6 +46,11 @@ public final class MarginMath {
     private MarginMath() {
     }
 
+    /** 标记价格可用：有限的正数。合约已不在配置里时标记价格是 NaN，那样的仓位按开仓均价算、不参与强平与 ADL。 */
+    public static boolean hasMark(double mark) {
+        return Double.isFinite(mark) && mark > 0;
+    }
+
     /** 保证金率 = 维持保证金 / 保证金余额；保证金余额不为正时视为正无穷（已达强平线）。 */
     public static double marginRatio(Money maintenanceMargin, Money marginBalance) {
         if (!marginBalance.isPositive()) {
@@ -76,7 +82,7 @@ public final class MarginMath {
         Map<String, Money> pnls = new HashMap<>();
         for (Position position : positions) {
             double mark = markPrice.applyAsDouble(position.symbol());
-            double price = Double.isFinite(mark) && mark > 0 ? mark : position.entryPrice();
+            double price = hasMark(mark) ? mark : position.entryPrice();
             Money notional = TradingBook.notional(price, position.lots(), position.quantityDecimals());
             Money maintenance = tiers.apply(position.symbol()).maintenanceMargin(notional);
             Money pnl = position.pnlAt(price);
@@ -102,7 +108,7 @@ public final class MarginMath {
             Money wallet = cross ? crossWallet : position.margin();
             Money otherMaintenance = cross ? crossMaintenance.minus(maintenance) : Money.ZERO;
             Money otherUnrealized = cross ? crossUnrealized.minus(pnls.get(symbol)) : Money.ZERO;
-            double quantity = position.lots() / Math.pow(10, position.quantityDecimals());
+            double quantity = ContractSpec.quantityOf(position.lots(), position.quantityDecimals());
             OptionalDouble liquidation = liquidationPrice(position.side(), quantity, position.entryPrice(),
                     crp(wallet), crp(otherMaintenance), crp(otherUnrealized), tiers.apply(symbol));
             risks.put(symbol, new PositionRisk(notionals.get(symbol), maintenance, balance,
@@ -146,6 +152,6 @@ public final class MarginMath {
     }
 
     private static double crp(Money money) {
-        return money.units() / 1e6;
+        return money.units() / (double) Money.UNITS_PER_CRP;
     }
 }

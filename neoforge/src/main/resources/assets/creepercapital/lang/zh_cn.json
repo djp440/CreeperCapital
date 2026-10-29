@@ -24,7 +24,7 @@
   "commands.creepercapital.market.jump": "%s 将在下一个行情步跳跃 %s%%",
   "commands.creepercapital.market.jump.unknown": "没有这个合约：%s",
   "screen.creepercapital.trading.table.assets": "资产",
-  "screen.creepercapital.trading.assets.wallet": "钱包余额",
+  "screen.creepercapital.trading.assets.wallet": "合约账户余额",
   "screen.creepercapital.trading.assets.unrealized_pnl": "未实现盈亏",
   "screen.creepercapital.trading.assets.margin_balance": "保证金余额",
   "screen.creepercapital.trading.assets.available_balance": "可用余额",

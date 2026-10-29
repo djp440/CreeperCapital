@@ -58,7 +58,7 @@ public final class LiquidityCurve {
         if (!(lastPrice > 0) || !Double.isFinite(lastPrice)) {
             throw new IllegalArgumentException("最新价格必须是有限的正数：" + lastPrice);
         }
-        long levelLots = Math.max(1, Math.round(LEVEL_NOTIONAL / lastPrice * Math.pow(10, quantityDecimals)));
+        long levelLots = Math.max(1, Math.round(LEVEL_NOTIONAL / lastPrice * ContractSpec.lotsPerUnit(quantityDecimals)));
         double referenceLevels = REFERENCE_NOTIONAL / LEVEL_NOTIONAL;
         double step = depthSlippage * 2 / (referenceLevels - 1);
         return new LiquidityCurve(lastPrice, spread / 2, levelLots, step);

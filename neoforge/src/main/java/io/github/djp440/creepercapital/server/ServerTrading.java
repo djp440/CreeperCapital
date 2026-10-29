@@ -139,7 +139,7 @@ public final class ServerTrading {
             return executeMargin(player, spec, order);
         }
         TradeResult result = submit(id, spec, order);
-        // 玩家平仓可能让附带的止盈止损失效，记录下来（离线汇总在 #19 接）
+        // 玩家平仓可能让附带的止盈止损失效，记进日志（玩家自己操作引起的，不进离线汇总）
         logEvents(book().orders().takeEvents());
         if (result instanceof TradeResult.Rejected rejected) {
             LOGGER.debug("拒绝 {} 的委托 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(), rejected.args());
@@ -512,7 +512,7 @@ public final class ServerTrading {
     private static void onServerStarting(ServerStartingEvent event) {
         data = event.getServer().getDataStorage().computeIfAbsent(TradingSavedData.TYPE);
         book = data.bind(ServerAccounts.book());
-        // 成交的源头：开平仓以及以后的强平、限价成交都经过这里，全服「最新成交」广播不挂在某个下单入口上
+        // 成交的源头：开平仓、限价成交、止盈止损、强平与自动减仓都经过这里，全服「最新成交」广播不挂在某个下单入口上
         MinecraftServer server = event.getServer();
         book.addTradeListener(trade -> ServerLatestTrades.onPlayerTrade(server, trade));
         LOGGER.info("交易账：流动性池 {} CRP，最近一笔玩家成交编号 {}", book.pool().balance().toDisplayString(),

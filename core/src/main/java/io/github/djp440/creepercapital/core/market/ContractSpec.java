@@ -120,7 +120,17 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
 
     /** {@code lots} 手对应多少个标的资源。 */
     public double quantityOf(long lots) {
-        return lots / Math.pow(10, quantityDecimals);
+        return quantityOf(lots, quantityDecimals);
+    }
+
+    /** 同上，只知道数量精度时用（仓位、下单参数里带的是精度，不是合约）。 */
+    public static double quantityOf(long lots, int quantityDecimals) {
+        return lots / lotsPerUnit(quantityDecimals);
+    }
+
+    /** 1 个标的资源对应多少手（10^数量精度）。 */
+    public static double lotsPerUnit(int quantityDecimals) {
+        return Math.pow(10, quantityDecimals);
     }
 
     /** 内置的两个合约：服务端没有配置文件时，据此生成默认配置。 */

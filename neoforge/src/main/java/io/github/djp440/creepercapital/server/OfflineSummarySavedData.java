@@ -25,7 +25,7 @@ import net.minecraft.world.level.saveddata.SavedDataType;
  * 平铺成 {@code 玩家 × 类型 × 合约} 的条目列表，金额以最小单位的整数存储。
  */
 public final class OfflineSummarySavedData extends SavedData {
-    private static final Codec<EventType> EVENT_TYPE = Codec.STRING.xmap(EventType::valueOf, EventType::name);
+    private static final Codec<EventType> EVENT_TYPE = EnumCodecs.of(EventType.class);
 
     private record Owned(UUID player, Entry entry) {
     }

@@ -1,14 +1,17 @@
 package io.github.djp440.creepercapital.gametest;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTrade;
+import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.network.LatestTradesPayload;
@@ -41,6 +44,81 @@ final class LatestTradesGameTests {
         function.accept("simulated_trades_are_broadcast_and_leave_every_balance_alone",
                 LatestTradesGameTests::simulatedTradesAreBroadcastAndLeaveEveryBalanceAlone);
         function.accept("server_keeps_only_the_most_recent_trades_per_contract", LatestTradesGameTests::serverKeepsOnlyTheMostRecentTrades);
+        function.accept("liquidation_reaches_another_players_tape", LatestTradesGameTests::liquidationReachesAnotherPlayersTape);
+        function.accept("limit_fill_reaches_another_players_tape", LatestTradesGameTests::limitFillReachesAnotherPlayersTape);
+    }
+
+    private static ContractSpec spec() {
+        return ServerMarket.spec(DIAMOND);
+    }
+
+    /** 半档的数量：在第一档之内，名义价值不大，不会碰到分档的仓位上限。 */
+    private static long lots() {
+        return Math.max(1, spec().liquidityCurve(ServerMarket.snapshot(DIAMOND).lastPrice()).levelLots() / 2);
+    }
+
+    /**
+     * 强平的成交也走成交监听：另一名在线玩家的最新成交里出现带玩家名的强平（逐仓多头被强平是卖出，按触发强平的标记价格、全部数量）。
+     * 直接调强平阶段并限定只检查本测试的玩家，免得注入的极端价格误伤共用账本里别的测试。
+     */
+    private static void liquidationReachesAnotherPlayersTape(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        ServerPlayer trader = TradingGameTests.trader(helper, "TapeLiq1", "100000");
+        ServerPlayer watcher = MockClient.join(helper, "TapeLiqWatcher");
+        try {
+            UUID id = trader.getUUID();
+            ServerTrading.handleOrder(trader, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, lots(),
+                    Math.min(10, spec().maxLeverage())));
+            Position position = ServerTrading.book().position(id, DIAMOND).orElseThrow();
+            // 标记价格腰斩：10 倍以内的杠杆都远远越过强平线
+            double mark = position.entryPrice() * 0.5;
+            long seconds = ServerMarket.snapshot(DIAMOND).time().totalSeconds();
+
+            List<LiquidationEvent> events = ServerTrading.liquidate(server, seconds,
+                    symbol -> DIAMOND.equals(symbol) ? mark : Double.NaN, other -> other.equals(id), new LinkedHashSet<>());
+
+            helper.assertValueEqual(events.size(), 1, "本测试的玩家被强平");
+            List<MarketTrade> seen = playerTradesOf(watcher, "TapeLiq1");
+            helper.assertValueEqual(seen.size(), 2, "旁观玩家看到开仓和强平两笔");
+            MarketTrade liquidation = seen.get(1);
+            helper.assertTrue(liquidation.isPlayer() && !liquidation.buy(), "强平多头是卖出，且标出玩家名");
+            helper.assertValueEqual(liquidation.price(), mark, "强平按标记价格成交");
+            helper.assertValueEqual(liquidation.lots(), position.lots(), "强平全部数量");
+            helper.assertValueEqual(liquidation.symbol(), DIAMOND, "交易代码");
+        } finally {
+            TradingGameTests.finish(trader);
+            MockClient.leave(watcher);
+        }
+        helper.succeed();
+    }
+
+    /**
+     * 限价挂单在行情步成交也走成交监听：玩家挂一张略低于市价的买单后下线，价格跳空穿过委托价，
+     * 另一名在线玩家的最新成交里出现这笔 maker 成交（买入，按委托价）。
+     */
+    private static void limitFillReachesAnotherPlayersTape(GameTestHelper helper) {
+        ServerPlayer trader = TradingGameTests.trader(helper, "TapeLimit1", "1000");
+        ServerPlayer watcher = MockClient.join(helper, "TapeLimitWatcher");
+        UUID id = trader.getUUID();
+        double price = Math.floor(ServerMarket.snapshot(DIAMOND).lastPrice() * 0.99);
+        // 低杠杆：成交后同一个行情步里价格已经大跌，高杠杆的多头会被强平，而这里要验证的是限价成交
+        ServerTrading.handleOrder(trader, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000L, Math.min(2, spec().maxLeverage()),
+                OrderPayload.Execution.LIMIT, price));
+        helper.assertValueEqual(ServerTrading.book().orders().open(id).size(), 1, "挂出一张限价买单");
+        long placedLots = ServerTrading.book().orders().open(id).get(0).lots();
+        ServerMarket.queueJump(DIAMOND, -0.1);
+
+        helper.succeedWhen(() -> {
+            helper.assertTrue(ServerTrading.book().orders().open(id).isEmpty(), "委托应已在行情步成交");
+            List<MarketTrade> seen = playerTradesOf(watcher, "TapeLimit1");
+            helper.assertValueEqual(seen.size(), 1, "旁观玩家看到这笔限价成交");
+            helper.assertTrue(seen.get(0).isPlayer() && seen.get(0).buy(), "限价买入是买入，且标出玩家名");
+            helper.assertValueEqual(seen.get(0).price(), price, "按委托价成交");
+            helper.assertValueEqual(seen.get(0).lots(), placedLots, "数量");
+            // 断言全部通过后才收尾：断言失败会在下个 tick 重试，不能提前把旁观玩家和仓位清掉
+            MockClient.leave(watcher);
+            TradingGameTests.finish(trader);
+        });
     }
 
     private static void payloadRoundTrips(GameTestHelper helper) {
@@ -75,7 +153,7 @@ final class LatestTradesGameTests {
                     ServerTrading.book().trades(trader.getUUID()).get(0).price(), "成交价与玩家自己的成交记录一致");
             helper.assertValueEqual(playerTradesOf(trader, "TapeTrader1").size(), 2, "交易者自己也收到");
         } finally {
-            finish(trader);
+            TradingGameTests.finish(trader);
             MockClient.leave(watcher);
         }
         helper.succeed();
@@ -106,7 +184,7 @@ final class LatestTradesGameTests {
             helper.assertValueEqual(seen.size(), 1, "晚进服的玩家登录时补发了这笔成交");
             helper.assertTrue(!seen.get(0).buy(), "开空是卖出");
         } finally {
-            finish(trader);
+            TradingGameTests.finish(trader);
             if (latecomer != null) {
                 MockClient.leave(latecomer);
             }

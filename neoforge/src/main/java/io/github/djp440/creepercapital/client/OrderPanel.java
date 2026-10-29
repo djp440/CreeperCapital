@@ -340,10 +340,11 @@ final class OrderPanel {
         String fee = "--";
         if (limit) {
             double price = limitPrice.orElse(Double.NaN);
-            if (params != null && lots.isPresent() && price > 0) {
-                double notional = price * lots.getAsLong() / Math.pow(10, params.quantityDecimals());
-                margin = MarketFormat.price(notional / leverage) + " CRP";
-                fee = MarketFormat.price(notional * TradingBook.MAKER_FEE_RATE) + " CRP";
+            if (params != null && lots.isPresent()) {
+                // 和服务端挂单冻结（frozenFor）同源同取整，不在界面里另算
+                Optional<OpenEstimate> frozen = TradingBook.estimateLimit(params, price, lots.getAsLong(), leverage);
+                margin = frozen.map(estimate -> MarketFormat.money(estimate.margin()) + " CRP").orElse("--");
+                fee = frozen.map(estimate -> MarketFormat.fee(estimate.fee()) + " CRP").orElse("--");
             }
         } else {
             Optional<OpenEstimate> buy = estimate(params, snapshot, Side.LONG, lots, leverage);

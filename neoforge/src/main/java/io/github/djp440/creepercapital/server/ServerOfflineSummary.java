@@ -1,7 +1,6 @@
 package io.github.djp440.creepercapital.server;
 
 import java.util.Locale;
-import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -31,8 +30,8 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
  * 玩家上线时在聊天栏发一条汇总通知并清空。在线玩家的事件已经实时通知过，不进汇总。
  * <p>
  * 事件的产生处（{@link ServerTrading} 的行情步各阶段）调用这里的 {@code onXxx}，由这里判断玩家此刻是否在线。
- * 加新的离线事件类型（例如自动减仓）：在 {@link EventType} 加常量、在产生处调 {@link #onEvent}、两份语言文件加
- * {@code message.creepercapital.offline_summary.<类型名小写>}。
+ * 加新的离线事件类型：在 {@link EventType} 加常量、在这里加一个 {@code onXxx} 并在产生处调用它（参照 {@link #onAutoDeleverage}）、
+ * 两份语言文件加 {@code message.creepercapital.offline_summary.<类型名小写>}。
  */
 public final class ServerOfflineSummary {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -55,21 +54,6 @@ public final class ServerOfflineSummary {
             throw new IllegalStateException("服务器未运行，没有离线汇总");
         }
         return data.summaries();
-    }
-
-    /**
-     * 通用入口：玩家此刻不在线才记。
-     *
-     * @return 是否记了
-     */
-    public static boolean onEvent(MinecraftServer server, UUID player, EventType type, String symbol, Money amount,
-            long marketSeconds) {
-        if (data == null || server.getPlayerList().getPlayer(player) != null) {
-            return false;
-        }
-        data.summaries().record(player, type, symbol, amount, marketSeconds);
-        data.setDirty();
-        return true;
     }
 
     /** 委托成交 / 止盈止损触发（其它种类的委托事件不记）。 */

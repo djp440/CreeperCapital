@@ -14,6 +14,8 @@ import java.util.regex.Pattern;
 public record Money(long units) implements Comparable<Money> {
     /** 小数位数。 */
     public static final int SCALE = 6;
+    /** 1 CRP 等于多少最小单位（10^SCALE）。 */
+    public static final long UNITS_PER_CRP = BigInteger.TEN.pow(SCALE).longValueExact();
     private static final Pattern PLAIN_DECIMAL = Pattern.compile("[+-]?\\d+(\\.\\d+)?");
 
     public static final Money ZERO = new Money(0);
