@@ -29,7 +29,7 @@ public final class TradingScreen extends Screen {
         super(Component.translatable("screen.creepercapital.trading.title"));
     }
 
-    static void open() {
+    public static void open() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
             minecraft.setScreen(new TradingScreen());
