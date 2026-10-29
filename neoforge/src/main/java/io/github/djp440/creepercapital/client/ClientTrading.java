@@ -18,6 +18,7 @@ import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
@@ -47,6 +48,10 @@ public final class ClientTrading {
     private static List<Order> orders = List.of();
     /** 下单面板当前选的是限价（否则市价）；只是界面选择。 */
     private static boolean limitMode;
+    /** 下单面板当前展开的是止盈止损设置页（否则是预估页）、止盈止损的触发价来源、只减仓开关；都只是界面选择。 */
+    private static boolean protectionPage;
+    private static TriggerSource triggerSource = TriggerSource.LAST;
+    private static boolean reduceOnly;
     private static @Nullable Message lastResult;
 
     private ClientTrading() {
@@ -74,6 +79,9 @@ public final class ClientTrading {
         crossSymbols = Set.of();
         orders = List.of();
         limitMode = false;
+        protectionPage = false;
+        triggerSource = TriggerSource.LAST;
+        reduceOnly = false;
         lastResult = null;
     }
 
@@ -124,6 +132,35 @@ public final class ClientTrading {
 
     public static void setLimitMode(boolean limit) {
         limitMode = limit;
+    }
+
+    public static boolean protectionPage() {
+        return protectionPage;
+    }
+
+    public static void setProtectionPage(boolean protection) {
+        protectionPage = protection;
+    }
+
+    public static TriggerSource triggerSource() {
+        return triggerSource;
+    }
+
+    /** 在最新价格与标记价格之间切换止盈止损的触发价来源。 */
+    public static void toggleTriggerSource() {
+        triggerSource = triggerSource == TriggerSource.LAST ? TriggerSource.MARK : TriggerSource.LAST;
+    }
+
+    public static void setTriggerSource(TriggerSource source) {
+        triggerSource = source;
+    }
+
+    public static boolean reduceOnly() {
+        return reduceOnly;
+    }
+
+    public static void setReduceOnly(boolean value) {
+        reduceOnly = value;
     }
 
     public static @Nullable Message lastResult() {
@@ -230,6 +267,19 @@ public final class ClientTrading {
     public static void sendLimit(OrderPayload.Action action, String symbol, long lots, double price) {
         ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage(symbol),
                 OrderPayload.Execution.LIMIT, price));
+    }
+
+    /**
+     * 发出一笔委托（市价或限价），可附带止盈止损；触发价来源与只减仓取下单面板上的选择。结果由服务端回报。
+     *
+     * @param price      限价委托的委托价；市价为 0
+     * @param takeProfit 止盈价，0 为不设
+     * @param stopLoss   止损价，0 为不设
+     */
+    public static void sendOrder(OrderPayload.Action action, String symbol, long lots, OrderPayload.Execution execution,
+            double price, double takeProfit, double stopLoss) {
+        ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage(symbol), execution, price,
+                takeProfit, stopLoss, triggerSource, reduceOnly));
     }
 
     /** 撤销一张挂单；结果由服务端回报。 */

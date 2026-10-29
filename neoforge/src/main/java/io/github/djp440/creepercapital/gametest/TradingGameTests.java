@@ -20,6 +20,7 @@ import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderExtras;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
@@ -29,6 +30,7 @@ import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradeResult;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
@@ -91,6 +93,7 @@ final class TradingGameTests {
             }
         });
         LimitOrderGameTests.register(function);
+        ProtectionGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
@@ -110,6 +113,14 @@ final class TradingGameTests {
                 987.65);
         OrderPayload.STREAM_CODEC.encode(buffer, limit);
         helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), limit, "限价下单载荷");
+        OrderPayload protection = new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000, 10, OrderPayload.Execution.MARKET,
+                0, 1100.5, 900.25, TriggerSource.MARK, true);
+        OrderPayload.STREAM_CODEC.encode(buffer, protection);
+        helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), protection, "带止盈止损与只减仓的下单载荷");
+        OrderPayload protect = new OrderPayload(OrderPayload.Action.PROTECT, DIAMOND, 1000, 0, OrderPayload.Execution.MARKET, 0,
+                1100, 0, TriggerSource.LAST, false);
+        OrderPayload.STREAM_CODEC.encode(buffer, protect);
+        helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), protect, "补设止盈止损的载荷");
         CancelOrderPayload cancel = new CancelOrderPayload(42);
         CancelOrderPayload.STREAM_CODEC.encode(buffer, cancel);
         helper.assertValueEqual(CancelOrderPayload.STREAM_CODEC.decode(buffer), cancel, "撤单载荷");
@@ -123,7 +134,13 @@ final class TradingGameTests {
                 List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
                                 OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
                         new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
-                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)),
+                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED),
+                        new Order(5, player, DIAMOND, Side.LONG, OrderType.TAKE_PROFIT, 1100.5, 1000, 0, Money.ZERO,
+                                OrderStatus.OPEN, 0, Money.ZERO, 86020, 0, CancelReason.NONE,
+                                new OrderExtras(true, TriggerSource.MARK, 0, 0)),
+                        new Order(6, player, DIAMOND, Side.LONG, OrderType.LIMIT, 950, 1000, 10, Money.parse("95.19"),
+                                OrderStatus.OPEN, 0, Money.ZERO, 86030, 0, CancelReason.NONE,
+                                new OrderExtras(false, TriggerSource.LAST, 1100.5, 900.25))),
                 List.of(DIAMOND));
         TradingStatePayload.STREAM_CODEC.encode(buffer, state);
         helper.assertValueEqual(TradingStatePayload.STREAM_CODEC.decode(buffer), state, "交易状态载荷");
