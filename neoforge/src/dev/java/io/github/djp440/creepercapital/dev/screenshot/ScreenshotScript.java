@@ -90,10 +90,11 @@ final class ScreenshotScript {
                     View.ORDER_PANEL,
                     leverage("GUNPOWDERCRP", 20)),
             new ScreenshotStep("12", "仓位页（3 级验收）",
-                    "表格区的「仓位」页签为黄字加下划线；表头：合约、数量、开仓均价、标记价格、保证金、未实现盈亏（收益率）、操作；"
-                            + "两行仓位：GUNPOWDERCRP 20x 多 50 个（绿字）和 DIAMONDCRP 10x 空 1.500 个（红字）；"
+                    "表格区的「仓位」页签为黄字加下划线；表头：合约、数量、开仓均价、标记价格、预估强平价、保证金率、保证金、未实现盈亏（收益率）、操作；"
+                            + "两行仓位：GUNPOWDERCRP 逐仓 20x 多 50 个（绿字）和 DIAMONDCRP 逐仓 10x 空 1.500 个（红字）；"
                             + "开仓均价与标记价格相差约半个点差，未实现盈亏随标记价格变化且带正负号与收益率百分比（盈绿亏红）；"
-                            + "每行末尾有「市价平仓」按钮；下单面板里显示当前仓位的杠杆已锁定；列不重叠、无乱码。",
+                            + "预估强平价（黄字）多头低于、空头高于标记价格，保证金率是个很小的百分比（刚开仓时远离 100%）；"
+                            + "每行末尾有「市价平仓」按钮；列不重叠、无乱码。",
                     View.POSITIONS,
                     openPositions()),
             new ScreenshotStep("13", "成交历史页（3 级验收）",
@@ -102,7 +103,23 @@ final class ScreenshotScript {
                             + "下面是开多 GUNPOWDERCRP、开空 DIAMONDCRP 的开仓记录（已实现盈亏显示 \"--\"）；"
                             + "每笔手续费 = 名义价值 × 0.05%，开多成交价高于最新价、开空成交价低于最新价；列不重叠、无乱码。",
                     View.TRADES,
-                    closeGunpowder()));
+                    closeGunpowder()),
+            new ScreenshotStep("14", "全仓仓位（一组全仓、一组逐仓，3 级验收）",
+                    "表格区在「仓位」页；刚把 GUNPOWDERCRP 切为全仓，并以 10x 开多 300 个（名义价值约 3.8 万 CRP），此时 DIAMONDCRP 10x 空 1.500 个仍是逐仓：两行合约列分别写着"
+                            + "「GUNPOWDERCRP 全仓 10x」（绿字）和「DIAMONDCRP 逐仓 10x」（红字）；"
+                            + "每行有预估强平价（黄字）和保证金率（百分比；逐仓行只算该仓位自己的保证金，约 4.0%；全仓行是维持保证金除以全仓钱包，约 5.1%）；"
+                            + "逐仓空头的强平价高于标记价格约 9.5%，全仓多头的强平价约 86.8、远低于标记价格 126（全仓用整个余额扛亏损，所以远得多）；"
+                            + "右侧下单面板（GUNPOWDERCRP）顶部的模式按钮显示「全仓」；列不重叠、无乱码。",
+                    View.POSITIONS,
+                    openCrossGunpowder()),
+            new ScreenshotStep("15", "杠杆调整（有仓位时调低杠杆，3 级验收）",
+                    "刚把 GUNPOWDERCRP 的全仓多头从 10x 调到 5x（点了杠杆 − 一次）：下单面板的杠杆显示 5x，且 − / + 按钮没有被锁定；"
+                            + "下单面板结果行是「GUNPOWDERCRP 杠杆已调整为 5x」；仓位页里这一行合约列变为「GUNPOWDERCRP 全仓 5x」，"
+                            + "保证金约为调整前的两倍（名义价值 / 5，约 7,575），可用余额相应减少约 3,800；"
+                            + "全仓的强平价和保证金率几乎不变（全仓钱包没有变，调杠杆只是把可用余额挪进保证金）；"
+                            + "DIAMONDCRP 逐仓那一行不变；列不重叠、无乱码。",
+                    View.POSITIONS,
+                    lowerGunpowderLeverage()));
 
     private ScreenshotScript() {
     }
@@ -137,6 +154,20 @@ final class ScreenshotScript {
     private static Consumer<Minecraft> closeGunpowder() {
         return minecraft -> ClientTrading.position("GUNPOWDERCRP")
                 .ifPresent(position -> ClientTrading.send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", position.lots()));
+    }
+
+    /** 把 GUNPOWDERCRP 设为全仓并以 10x 开多 300 个（名义价值约 3.8 万 CRP，全仓强平价才落在价格之下而不是负数；两个包按发送顺序在服务端处理，所以先切模式再开仓）。 */
+    private static Consumer<Minecraft> openCrossGunpowder() {
+        return minecraft -> {
+            ClientTrading.toggleMarginMode("GUNPOWDERCRP");
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 10);
+            ClientTrading.send(OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 300);
+        };
+    }
+
+    /** 有仓位时点一次杠杆 −：10x 调到 5x。 */
+    private static Consumer<Minecraft> lowerGunpowderLeverage() {
+        return minecraft -> ClientTrading.lowerLeverage("GUNPOWDERCRP");
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {

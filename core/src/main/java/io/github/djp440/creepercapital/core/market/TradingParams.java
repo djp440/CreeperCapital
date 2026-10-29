@@ -7,6 +7,7 @@ package io.github.djp440.creepercapital.core.market;
  * @param spread           点差（CRP）
  * @param maxLeverage      最高杠杆倍数
  * @param quantityDecimals 数量精度（小数位数）
+ * @param marginTiers      维持保证金与杠杆上限的分档：界面据此算保证金率和预估强平价，口径与服务端一致
  */
-public record TradingParams(String symbol, double spread, int maxLeverage, int quantityDecimals) {
+public record TradingParams(String symbol, double spread, int maxLeverage, int quantityDecimals, MarginTiers marginTiers) {
 }

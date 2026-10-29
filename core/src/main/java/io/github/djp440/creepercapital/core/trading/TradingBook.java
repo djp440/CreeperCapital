@@ -14,16 +14,20 @@ import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
+import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 
 /**
- * 全服的交易账：玩家的仓位和成交历史，以及与玩家对赌的流动性池。市价委托以流动性池为对手方（ADR-0001），逐仓、单向持仓。
+ * 全服的交易账：玩家的仓位和成交历史，以及与玩家对赌的流动性池。市价委托以流动性池为对手方（ADR-0001），单向持仓，
+ * 保证金模式按（玩家，合约）设置，逐仓或全仓（见 {@link MarginMode}）。
  * <p>
  * 资金只在玩家的可用余额（{@link AccountBook}）、仓位保证金和流动性池之间流动：开仓把保证金和手续费从可用余额划出，
  * 平仓把保证金加上已实现盈亏、减去手续费划回，盈亏的另一头和手续费都在流动性池。除开发命令外，三者的总额不变。
  * <p>
- * 尚未做强平（见 #11），所以平仓时亏损最多亏到该仓位的保证金（逐仓的含义）；流动性池无力付出盈利时（见 #16，ADL）
- * 最多付出池子的全部余额。
+ * 尚未做强平（见 #12）：逐仓平仓时亏损最多亏到该仓位的保证金；全仓平仓时亏损最多亏到账户里的全部余额（余额不会为负）。
+ * 流动性池无力付出盈利时（见 #16，ADL）最多付出池子的全部余额。
+ * <p>
+ * 维持保证金、保证金率和强平价的公式在 {@link MarginMath}，分档在合约的 {@link MarginTiers}，这里不重复。
  */
 public final class TradingBook {
     /** taker 手续费率：成交名义价值的 0.05%。 */
@@ -38,6 +42,8 @@ public final class TradingBook {
     private final LiquidityPool pool;
     private final Map<UUID, Map<String, Position>> positions = new HashMap<>();
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
+    /** 设为全仓的（玩家，合约）；没有记录的是缺省的逐仓。 */
+    private final Map<UUID, Map<String, MarginMode>> modes = new HashMap<>();
     private long lastTradeId;
 
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
@@ -55,6 +61,7 @@ public final class TradingBook {
             book.positions.put(player, bySymbol);
         });
         state.trades().forEach((player, history) -> book.trades.put(player, new ArrayList<>(history)));
+        state.marginModes().forEach((player, bySymbol) -> book.modes.put(player, new HashMap<>(bySymbol)));
         return book;
     }
 
@@ -68,12 +75,23 @@ public final class TradingBook {
         });
         Map<UUID, List<PlayerTrade>> history = new HashMap<>();
         trades.forEach((player, list) -> history.put(player, List.copyOf(list)));
-        return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history));
+        Map<UUID, Map<String, MarginMode>> savedModes = new HashMap<>();
+        modes.forEach((player, bySymbol) -> {
+            if (!bySymbol.isEmpty()) {
+                savedModes.put(player, Map.copyOf(bySymbol));
+            }
+        });
+        return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history),
+                Map.copyOf(savedModes));
     }
 
     /**
-     * 玩家的资产：钱包余额含仓位占用的保证金；保证金余额 = 钱包余额 + 未实现盈亏；可用余额是还没占用的余额
-     * （逐仓的未实现盈亏不计入，要平仓实现了才能动用）。
+     * 玩家的资产：钱包余额含仓位占用的保证金；保证金余额 = 钱包余额 + 未实现盈亏；可用余额是还能拿来开新仓的钱。
+     * <ul>
+     * <li>逐仓仓位的未实现盈亏最多亏到它的保证金（和平仓结算一致），不影响可用余额，要平仓实现了才能动用。</li>
+     * <li>全仓仓位的未实现盈亏不设下限；全仓浮亏会占用可用余额（可用余额 = 空闲余额 + 全仓浮亏，不低于 0），
+     * 全仓浮盈不算可用（比币安保守：浮盈要平仓实现了才能动用，免得凭空造出还没从流动性池收到的钱）。</li>
+     * </ul>
      *
      * @param markPrice 某个合约当前的标记价格；返回 NaN（合约已不在配置里）时该仓位按开仓均价算，盈亏为 0
      */
@@ -81,16 +99,112 @@ public final class TradingBook {
         Money free = accounts.balance(player);
         Money margins = Money.ZERO;
         Money unrealized = Money.ZERO;
+        Money crossUnrealized = Money.ZERO;
         for (Position position : positions(player)) {
             margins = margins.plus(position.margin());
             double mark = markPrice.applyAsDouble(position.symbol());
-            // 逐仓亏损最多亏到保证金（和平仓结算一致）；没有强平前，浮亏不会让保证金余额低于可用余额
-            Money floor = Money.ZERO.minus(position.margin());
             Money pnl = Double.isFinite(mark) ? position.pnlAt(mark) : Money.ZERO;
-            unrealized = unrealized.plus(pnl.compareTo(floor) < 0 ? floor : pnl);
+            if (position.mode() == MarginMode.CROSS) {
+                crossUnrealized = crossUnrealized.plus(pnl);
+                unrealized = unrealized.plus(pnl);
+            } else {
+                // 逐仓亏损最多亏到保证金（和平仓结算一致）
+                Money floor = Money.ZERO.minus(position.margin());
+                unrealized = unrealized.plus(pnl.compareTo(floor) < 0 ? floor : pnl);
+            }
         }
         Money wallet = free.plus(margins);
-        return new Assets(wallet, unrealized, wallet.plus(unrealized), free);
+        Money available = crossUnrealized.compareTo(Money.ZERO) < 0 ? free.plus(crossUnrealized) : free;
+        if (!available.isPositive()) {
+            available = Money.ZERO;
+        }
+        return new Assets(wallet, unrealized, wallet.plus(unrealized), available);
+    }
+
+    /** 这名玩家在这个合约上设置的保证金模式（缺省逐仓）；有仓位时就是仓位的模式。 */
+    public MarginMode marginMode(UUID player, String symbol) {
+        return modes.getOrDefault(player, Map.of()).getOrDefault(symbol, MarginMode.ISOLATED);
+    }
+
+    /**
+     * 这名玩家在这个合约上是否有仓位或委托：有的话不能切换保证金模式。
+     * 目前只有仓位；限价委托（#14）上线后在这里把挂单也算进来，它是「有没有敞口」的唯一判断点。
+     */
+    public boolean hasOpenExposure(UUID player, String symbol) {
+        return position(player, symbol).isPresent();
+    }
+
+    /**
+     * 切换保证金模式（币安规则：该合约有仓位或委托时不能切换）。设成和现在一样也算生效。
+     */
+    public MarginResult setMarginMode(UUID player, String symbol, MarginMode mode) {
+        if (hasOpenExposure(player, symbol)) {
+            return MarginResult.reject(TradeResult.Reason.MARGIN_MODE_LOCKED);
+        }
+        if (mode == MarginMode.CROSS) {
+            modes.computeIfAbsent(player, p -> new HashMap<>()).put(symbol, mode);
+        } else {
+            Map<String, MarginMode> own = modes.get(player);
+            if (own != null) {
+                own.remove(symbol);
+            }
+        }
+        return new MarginResult.Applied();
+    }
+
+    /**
+     * 调整已有仓位的杠杆（币安规则：有仓位时也可以调，受当前名义价值所在档位的杠杆上限和可用保证金约束）。
+     * <p>
+     * 仓位的保证金按 开仓名义价值 / 新杠杆 重算：调低杠杆要补保证金，从可用余额里扣，不够就拒绝；调高杠杆退回多余的保证金。
+     * 逐仓仓位调高杠杆后，保证金率不能达到 100%（否则一调就被强平）。和币安的差别：币安的逐仓仓位有仓位时不能调低杠杆
+     * （因为不会自动补保证金），这里自动从可用余额补，所以两个方向都允许。
+     *
+     * @param markPrice 各合约当前的标记价格（当前名义价值与可用余额按它算）
+     */
+    public MarginResult adjustLeverage(UUID player, ContractSpec spec, ToDoubleFunction<String> markPrice, int leverage) {
+        Position position = position(player, spec.symbol()).orElse(null);
+        if (position == null) {
+            return MarginResult.reject(TradeResult.Reason.NO_POSITION);
+        }
+        if (leverage < 1 || leverage > spec.maxLeverage()) {
+            return MarginResult.reject(TradeResult.Reason.INVALID_LEVERAGE, String.valueOf(spec.maxLeverage()));
+        }
+        MarginTiers tiers = spec.marginTiers();
+        double mark = markPrice.applyAsDouble(spec.symbol());
+        double price = Double.isFinite(mark) && mark > 0 ? mark : position.entryPrice();
+        Money currentNotional = notional(price, position.lots(), position.quantityDecimals());
+        int tierLimit = tiers.maxLeverageAt(currentNotional);
+        if (leverage > tierLimit) {
+            return MarginResult.reject(TradeResult.Reason.LEVERAGE_ABOVE_TIER, String.valueOf(tierLimit),
+                    currentNotional.toDisplayString());
+        }
+        if (leverage == position.leverage()) {
+            return new MarginResult.Applied();
+        }
+        Money newMargin = Money.ofUnits(ceilDiv(
+                notional(position.entryPrice(), position.lots(), position.quantityDecimals()).units(), leverage));
+        Money delta = newMargin.minus(position.margin());
+        if (delta.isPositive()) {
+            Money available = assets(player, markPrice).availableBalance();
+            if (available.compareTo(delta) < 0) {
+                return MarginResult.reject(TradeResult.Reason.INSUFFICIENT_BALANCE, delta.toDisplayString(),
+                        available.toDisplayString());
+            }
+        } else if (position.mode() == MarginMode.ISOLATED) {
+            // 逐仓退回保证金后，仓位自己的保证金余额要仍然覆盖维持保证金
+            Money balance = newMargin.plus(position.pnlAt(price));
+            double ratio = MarginMath.marginRatio(tiers.maintenanceMargin(currentNotional), balance);
+            if (ratio >= 1.0) {
+                return MarginResult.reject(TradeResult.Reason.LEVERAGE_UNSAFE, MarginMath.formatRatio(ratio));
+            }
+        }
+        if (delta.isPositive()) {
+            accounts.withdraw(player, delta);
+        } else if (delta.units() < 0) {
+            accounts.deposit(player, Money.ZERO.minus(delta));
+        }
+        positions.get(player).put(spec.symbol(), position.withLeverage(leverage, newMargin));
+        return new MarginResult.Applied();
     }
 
     public LiquidityPool pool() {
@@ -118,6 +232,19 @@ public final class TradingBook {
      * @param leverage 杠杆倍数
      */
     public TradeResult open(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots, int leverage) {
+        // 只知道这一个合约的行情：其他合约的全仓仓位按开仓均价算（盈亏为 0）
+        return open(player, spec, snapshot, side, lots, leverage,
+                symbol -> symbol.equals(snapshot.symbol()) ? snapshot.markPrice() : Double.NaN);
+    }
+
+    /**
+     * 市价开仓，可用余额按全部合约的标记价格算（全仓浮亏会占用可用余额）。
+     * 仓位的保证金模式是玩家在这个合约上设置的（已有仓位时是仓位的）；开仓后仓位的名义价值不能超过该杠杆下的档位上限。
+     *
+     * @param markPrice 各合约当前的标记价格
+     */
+    public TradeResult open(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots, int leverage,
+            ToDoubleFunction<String> markPrice) {
         if (lots <= 0) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
@@ -141,17 +268,24 @@ public final class TradingBook {
         Position updated;
         try {
             Money notional = notional(price, lots, spec.quantityDecimals());
+            Money total = existing == null ? notional
+                    : notional(price, Math.addExact(existing.lots(), lots), spec.quantityDecimals());
+            Money limit = spec.marginTiers().maxNotionalAt(leverage);
+            if (total.compareTo(limit) > 0) {
+                return TradeResult.reject(TradeResult.Reason.POSITION_LIMIT, limit.toDisplayString());
+            }
             margin = Money.ofUnits(ceilDiv(notional.units(), leverage));
             fee = fee(notional);
             required = margin.plus(fee);
             // 所有可能溢出的运算都在动钱之前做完，溢出时整笔不成交、账不变
             updated = existing == null
-                    ? new Position(spec.symbol(), side, lots, price, leverage, margin, spec.quantityDecimals())
+                    ? new Position(spec.symbol(), side, lots, price, leverage, margin, spec.quantityDecimals(),
+                            marginMode(player, spec.symbol()))
                     : addTo(existing, lots, price, margin);
         } catch (ArithmeticException e) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
-        Money available = accounts.balance(player);
+        Money available = assets(player, markPrice).availableBalance();
         if (available.compareTo(required) < 0) {
             return TradeResult.reject(TradeResult.Reason.INSUFFICIENT_BALANCE, required.toDisplayString(),
                     available.toDisplayString());
@@ -193,23 +327,28 @@ public final class TradingBook {
                         .divide(BigDecimal.valueOf(position.lots()), 0, RoundingMode.FLOOR).longValueExact());
         Money pnl = Position.pnl(position.side(), position.entryPrice(), price, lots, spec.quantityDecimals());
         Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()));
-        // 逐仓：亏损最多亏到这部分仓位的保证金；盈利由池子付，池子不够就付出它的全部余额
+        // 逐仓：亏损最多亏到这部分仓位的保证金；全仓：亏损最多亏到保证金加账户里的空闲余额（没有强平前余额不会为负）。
+        // 盈利由池子付，池子不够就付出它的全部余额
+        boolean cross = position.mode() == MarginMode.CROSS;
+        Money free = cross ? accounts.balance(player) : Money.ZERO;
         Money realized;
         if (pnl.isPositive()) {
             realized = pool.payUpTo(pnl);
         } else {
-            realized = pnl.compareTo(Money.ZERO.minus(releasedMargin)) < 0 ? Money.ZERO.minus(releasedMargin) : pnl;
+            Money loss = Money.ZERO.minus(releasedMargin.plus(free));
+            realized = pnl.compareTo(loss) < 0 ? loss : pnl;
             pool.receive(Money.ZERO.minus(realized));
         }
         Money gross = releasedMargin.plus(realized);
-        Money fee = tradeFee;
-        if (fee.compareTo(gross) > 0) {
-            fee = gross;
-        }
+        // 手续费从还剩的钱里收，不够就收剩下的
+        Money cushion = gross.plus(free);
+        Money fee = tradeFee.compareTo(cushion) > 0 ? cushion : tradeFee;
         pool.receive(fee);
         Money payout = gross.minus(fee);
         if (payout.isPositive()) {
             accounts.deposit(player, payout);
+        } else if (payout.units() < 0) {
+            accounts.withdraw(player, Money.ZERO.minus(payout));
         }
 
         Map<String, Position> own = positions.get(player);
@@ -218,7 +357,7 @@ public final class TradingBook {
         } else {
             own.put(spec.symbol(), new Position(position.symbol(), position.side(), position.lots() - lots,
                     position.entryPrice(), position.leverage(), position.margin().minus(releasedMargin),
-                    position.quantityDecimals()));
+                    position.quantityDecimals(), position.mode()));
         }
         return record(new PlayerTrade(0, player, spec.symbol(), position.side(), TradeKind.CLOSE, price, lots, fee,
                 realized, snapshot.time().totalSeconds()));
@@ -242,7 +381,7 @@ public final class TradingBook {
                 .add(BigDecimal.valueOf(price).multiply(BigDecimal.valueOf(lots)));
         double average = cost.divide(BigDecimal.valueOf(total), 12, RoundingMode.HALF_UP).doubleValue();
         return new Position(existing.symbol(), existing.side(), total, average, existing.leverage(),
-                existing.margin().plus(margin), existing.quantityDecimals());
+                existing.margin().plus(margin), existing.quantityDecimals(), existing.mode());
     }
 
     /** 市价成交价：买入（开多、平空）在最新价格上加半个点差，卖出（开空、平多）减半个点差。 */
@@ -257,7 +396,7 @@ public final class TradingBook {
     }
 
     /** 名义价值 = 价格 × 数量，取整到最小金额单位。 */
-    static Money notional(double price, long lots, int quantityDecimals) {
+    public static Money notional(double price, long lots, int quantityDecimals) {
         BigDecimal value = BigDecimal.valueOf(price).multiply(BigDecimal.valueOf(lots)).movePointLeft(quantityDecimals);
         return Money.ofUnits(value.movePointRight(Money.SCALE).setScale(0, RoundingMode.HALF_UP).longValueExact());
     }

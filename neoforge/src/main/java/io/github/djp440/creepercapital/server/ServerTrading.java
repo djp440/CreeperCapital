@@ -13,6 +13,8 @@ import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
+import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -115,12 +117,16 @@ public final class ServerTrading {
         }
         ContractSpec spec = ServerMarket.spec(order.symbol());
         UUID id = player.getUUID();
+        if (order.action().isMarginSetting()) {
+            return executeMargin(player, spec, order);
+        }
         TradeResult result = switch (order.action()) {
             case OPEN_LONG -> book().open(id, spec, ServerMarket.snapshot(order.symbol()), Side.LONG, order.lots(),
-                    order.leverage());
+                    order.leverage(), ServerTrading::markPrice);
             case OPEN_SHORT -> book().open(id, spec, ServerMarket.snapshot(order.symbol()), Side.SHORT, order.lots(),
-                    order.leverage());
+                    order.leverage(), ServerTrading::markPrice);
             case CLOSE -> book().close(id, spec, ServerMarket.snapshot(order.symbol()), order.lots());
+            default -> throw new IllegalStateException("不是成交动作：" + order.action());
         };
         if (result instanceof TradeResult.Rejected rejected) {
             LOGGER.debug("拒绝 {} 的委托 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(), rejected.args());
@@ -131,6 +137,28 @@ public final class ServerTrading {
                 trade.kind(), trade.side(), trade.symbol(), formatQuantity(trade.lots(), spec.quantityDecimals()),
                 trade.price(), trade.fee(), trade.realizedPnl());
         return filled(trade, spec);
+    }
+
+    /** 切换保证金模式或调整杠杆；回报的文案键见 lang 里的 {@code message.creepercapital.order.set_*}。 */
+    private static OrderResultPayload executeMargin(ServerPlayer player, ContractSpec spec, OrderPayload order) {
+        UUID id = player.getUUID();
+        MarginResult result = switch (order.action()) {
+            case SET_CROSS -> book().setMarginMode(id, spec.symbol(), MarginMode.CROSS);
+            case SET_ISOLATED -> book().setMarginMode(id, spec.symbol(), MarginMode.ISOLATED);
+            default -> book().adjustLeverage(id, spec, ServerTrading::markPrice, order.leverage());
+        };
+        if (result instanceof MarginResult.Rejected rejected) {
+            LOGGER.debug("拒绝 {} 的保证金设置 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(),
+                    rejected.args());
+            return rejected(rejected.reason().name().toLowerCase(Locale.ROOT), rejected.args().toArray(String[]::new));
+        }
+        LOGGER.info("玩家保证金设置 {} {} {} 杠杆 {}", player.getGameProfile().name(), order.action(), spec.symbol(),
+                order.leverage());
+        return switch (order.action()) {
+            case SET_CROSS -> new OrderResultPayload(true, "set_cross", List.of(spec.symbol()));
+            case SET_ISOLATED -> new OrderResultPayload(true, "set_isolated", List.of(spec.symbol()));
+            default -> new OrderResultPayload(true, "set_leverage", List.of(spec.symbol(), String.valueOf(order.leverage())));
+        };
     }
 
     private static OrderResultPayload filled(PlayerTrade trade, ContractSpec spec) {
@@ -167,7 +195,10 @@ public final class ServerTrading {
         List<PlayerTrade> trades = book().trades(player.getUUID());
         List<PlayerTrade> recent = trades.subList(Math.max(0, trades.size() - SYNCED_TRADES), trades.size());
         List<TradingParams> contracts = ServerMarket.symbols().stream().map(s -> ServerMarket.spec(s).trading()).toList();
-        ModPayloads.sendTo(player, new TradingStatePayload(contracts, book().positions(player.getUUID()), recent));
+        List<String> cross = ServerMarket.symbols().stream()
+                .filter(symbol -> book().marginMode(player.getUUID(), symbol) == MarginMode.CROSS).toList();
+        ModPayloads.sendTo(player,
+                new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, cross));
     }
 
     private static void markDirty() {

@@ -2,6 +2,7 @@ package io.github.djp440.creepercapital.server;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,15 +26,19 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
+import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
+import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.VolatilityProfile;
 import net.neoforged.fml.loading.FMLPaths;
 
 /**
  * 合约的服务端配置文件 {@code config/creepercapital-contracts.json}：每个合约的标的资源、起始价格、基础成交量、波动率倾向和交易参数。
  * <p>
- * 点差（{@code spread}，CRP，默认起始价格的 0.05%）、最高杠杆（{@code max_leverage}，默认 20）和数量精度
- * （{@code quantity_decimals}，默认 3 位）三项可以不写，写了就按写的算。
+ * 点差（{@code spread}，CRP，默认起始价格的 0.05%）、最高杠杆（{@code max_leverage}，默认 20）、数量精度
+ * （{@code quantity_decimals}，默认 3 位）和维持保证金分档（{@code maintenance_tiers}，默认按最高杠杆推出五档）四项可以不写，写了就按写的算。
+ * 分档是数组，每档 {@code up_to}（名义价值上界，CRP）、{@code max_leverage}、{@code maintenance_rate}；
+ * 上界递增、杠杆不升、费率不降，第一档的杠杆必须等于 {@code max_leverage}，最后一档的上界就是单个仓位的名义价值上限。
  * <p>
  * 文件不存在时按内置的两个合约（DIAMONDCRP、GUNPOWDERCRP）自动生成；改了文件，重启服务器后生效：
  * 市场的状态随存档保存，只有行情参数以文件为准，所以改波动率倾向不会让价格跳变。
@@ -53,6 +58,17 @@ public final class ContractConfig {
             Codec.DOUBLE.fieldOf("premium_bias").forGetter(VolatilityProfile::premiumBias))
             .apply(i, VolatilityProfile::new));
 
+    /** 金额在配置文件里写成数字（CRP），转成定点数时按十进制字面值，不引入二进制浮点误差。 */
+    private static final Codec<Money> CRP_CODEC = Codec.DOUBLE.xmap(
+            value -> Money.parse(BigDecimal.valueOf(value).toPlainString()),
+            money -> new BigDecimal(money.units()).movePointLeft(Money.SCALE).doubleValue());
+
+    private static final Codec<MarginTiers.Definition> TIER_CODEC = RecordCodecBuilder.create(i -> i.group(
+            CRP_CODEC.fieldOf("up_to").forGetter(MarginTiers.Definition::upTo),
+            Codec.INT.fieldOf("max_leverage").forGetter(MarginTiers.Definition::maxLeverage),
+            Codec.DOUBLE.fieldOf("maintenance_rate").forGetter(MarginTiers.Definition::maintenanceRate))
+            .apply(i, MarginTiers.Definition::new));
+
     private static final Codec<ContractSpec> CONTRACT_CODEC = RecordCodecBuilder.create(i -> i.group(
             Codec.STRING.fieldOf("symbol").forGetter(ContractSpec::symbol),
             Codec.STRING.fieldOf("underlying").forGetter(ContractSpec::underlying),
@@ -61,12 +77,15 @@ public final class ContractConfig {
             VOLATILITY_CODEC.fieldOf("volatility").forGetter(ContractSpec::volatility),
             Codec.DOUBLE.optionalFieldOf("spread").forGetter(spec -> Optional.of(spec.spread())),
             Codec.INT.optionalFieldOf("max_leverage").forGetter(spec -> Optional.of(spec.maxLeverage())),
-            Codec.INT.optionalFieldOf("quantity_decimals").forGetter(spec -> Optional.of(spec.quantityDecimals())))
-            .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals) ->
+            Codec.INT.optionalFieldOf("quantity_decimals").forGetter(spec -> Optional.of(spec.quantityDecimals())),
+            TIER_CODEC.listOf().optionalFieldOf("maintenance_tiers")
+                    .forGetter(spec -> Optional.of(spec.marginTiers().definitions())))
+            .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals, tiers) ->
                     new ContractSpec(symbol, underlying, initialPrice, baseVolume, volatility,
                             spread.orElseGet(() -> ContractSpec.defaultSpread(initialPrice)),
                             maxLeverage.orElse(ContractSpec.DEFAULT_MAX_LEVERAGE),
-                            quantityDecimals.orElse(ContractSpec.DEFAULT_QUANTITY_DECIMALS))));
+                            quantityDecimals.orElse(ContractSpec.DEFAULT_QUANTITY_DECIMALS),
+                            tiers.map(MarginTiers::of).orElse(null))));
 
     private ContractConfig() {
     }

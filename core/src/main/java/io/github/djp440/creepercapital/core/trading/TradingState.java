@@ -13,11 +13,18 @@ import io.github.djp440.creepercapital.core.account.Money;
  * @param lastTradeId  最近一笔成交的编号，恢复后接着往下编
  * @param positions    每位玩家的全部仓位
  * @param trades       每位玩家最近的成交，最旧的在前
+ * @param marginModes  每位玩家按合约设置的保证金模式；只记录和缺省（逐仓）不同的，即设为全仓的合约
  */
 public record TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
-        Map<UUID, List<PlayerTrade>> trades) {
+        Map<UUID, List<PlayerTrade>> trades, Map<UUID, Map<String, MarginMode>> marginModes) {
+    /** 没有保证金模式设置（旧存档）。 */
+    public TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
+            Map<UUID, List<PlayerTrade>> trades) {
+        this(poolBalance, lastTradeId, positions, trades, Map.of());
+    }
+
     /** 新世界的状态：池子是初始资金，没有仓位和成交。 */
     public static TradingState initial() {
-        return new TradingState(LiquidityPool.INITIAL_BALANCE, 0, Map.of(), Map.of());
+        return new TradingState(LiquidityPool.INITIAL_BALANCE, 0, Map.of(), Map.of(), Map.of());
     }
 }

@@ -5,10 +5,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.core.market.MarginTiers;
+import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.MarginMath;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.network.OrderPayload;
@@ -34,6 +39,8 @@ public final class ClientTrading {
     private static final Map<String, Integer> SELECTED_LEVERAGE = new HashMap<>();
     private static List<Position> positions = List.of();
     private static List<PlayerTrade> trades = List.of();
+    /** 玩家设为全仓的合约（没有仓位时，保证金模式只在这里）。 */
+    private static Set<String> crossSymbols = Set.of();
     private static @Nullable Message lastResult;
 
     private ClientTrading() {
@@ -44,6 +51,7 @@ public final class ClientTrading {
         payload.contracts().forEach(params -> PARAMS.put(params.symbol(), params));
         positions = List.copyOf(payload.positions());
         trades = List.copyOf(payload.trades());
+        crossSymbols = Set.copyOf(payload.crossSymbols());
     }
 
     static void accept(OrderResultPayload payload) {
@@ -56,6 +64,7 @@ public final class ClientTrading {
         SELECTED_LEVERAGE.clear();
         positions = List.of();
         trades = List.of();
+        crossSymbols = Set.of();
         lastResult = null;
     }
 
@@ -103,27 +112,40 @@ public final class ClientTrading {
         return Math.min(SELECTED_LEVERAGE.getOrDefault(symbol, DEFAULT_LEVERAGE), max);
     }
 
-    /** 杠杆调高一档；已有仓位时不能调整。 */
-    public static void raiseLeverage(String symbol) {
-        if (position(symbol).isPresent()) {
-            return;
+    /** 这个合约的保证金模式：有仓位以仓位的为准，否则是玩家设置的（缺省逐仓）。 */
+    public static MarginMode marginMode(String symbol) {
+        Optional<Position> position = position(symbol);
+        if (position.isPresent()) {
+            return position.get().mode();
         }
-        int current = leverage(symbol);
-        int max = maxLeverage(symbol);
-        for (int step : LEVERAGE_STEPS) {
-            if (step > current && step <= max) {
-                SELECTED_LEVERAGE.put(symbol, step);
-                return;
-            }
-        }
-        SELECTED_LEVERAGE.put(symbol, max);
+        return crossSymbols.contains(symbol) ? MarginMode.CROSS : MarginMode.ISOLATED;
     }
 
-    /** 杠杆调低一档；已有仓位时不能调整。 */
-    public static void lowerLeverage(String symbol) {
-        if (position(symbol).isPresent()) {
-            return;
+    /**
+     * 请求切换保证金模式（逐仓 ↔ 全仓）；有仓位或委托时服务端会拒绝并给出提示。
+     */
+    public static void toggleMarginMode(String symbol) {
+        ClientPacketDistributor.sendToServer(new OrderPayload(
+                marginMode(symbol) == MarginMode.CROSS ? OrderPayload.Action.SET_ISOLATED : OrderPayload.Action.SET_CROSS,
+                symbol, 0, leverage(symbol)));
+    }
+
+    /** 杠杆调高一档：没有仓位时只改面板上的选择，有仓位时请求服务端调整仓位的杠杆。 */
+    public static void raiseLeverage(String symbol) {
+        int current = leverage(symbol);
+        int max = maxLeverage(symbol);
+        int target = max;
+        for (int step : LEVERAGE_STEPS) {
+            if (step > current && step <= max) {
+                target = step;
+                break;
+            }
         }
+        changeLeverage(symbol, target);
+    }
+
+    /** 杠杆调低一档：没有仓位时只改面板上的选择，有仓位时请求服务端调整仓位的杠杆。 */
+    public static void lowerLeverage(String symbol) {
         int current = leverage(symbol);
         int lower = 1;
         for (int step : LEVERAGE_STEPS) {
@@ -131,7 +153,25 @@ public final class ClientTrading {
                 lower = step;
             }
         }
-        SELECTED_LEVERAGE.put(symbol, lower);
+        changeLeverage(symbol, lower);
+    }
+
+    private static void changeLeverage(String symbol, int target) {
+        if (position(symbol).isPresent()) {
+            ClientPacketDistributor.sendToServer(new OrderPayload(OrderPayload.Action.SET_LEVERAGE, symbol, 0, target));
+        } else {
+            SELECTED_LEVERAGE.put(symbol, target);
+        }
+    }
+
+    /**
+     * 本人全部仓位按各合约当前标记价格算的风险指标（维持保证金、保证金率、预估强平价），以交易代码为键。
+     * 与服务端强平用的是同一份 {@link MarginMath}，只是输入来自同步过来的仓位、钱包余额和分档。
+     */
+    public static Map<String, MarginMath.PositionRisk> risks() {
+        return MarginMath.assess(positions, ClientAccount.assets().walletBalance(),
+                symbol -> ClientMarket.snapshot(symbol).map(MarketSnapshot::markPrice).orElse(Double.NaN),
+                symbol -> params(symbol).map(TradingParams::marginTiers).orElseGet(() -> MarginTiers.standard(20)));
     }
 
     /** 直接设定杠杆（开发用：自动截图）。 */

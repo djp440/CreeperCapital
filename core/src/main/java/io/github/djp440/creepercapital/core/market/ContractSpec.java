@@ -14,9 +14,11 @@ import java.util.regex.Pattern;
  * @param spread       点差（CRP，价格的绝对间隔）：卖一价与买一价之差，最新价格位于正中；市价委托的成交价是最新价格 ± 半个点差
  * @param maxLeverage  最高杠杆倍数
  * @param quantityDecimals 数量精度（小数位数）：下单数量以 10^-位数 个标的资源为最小单位（一「手」）
+ * @param marginTiers  按名义价值分档的维持保证金与杠杆上限；传 null 时按最高杠杆取默认分档（{@link MarginTiers#standard}），
+ *                     第一档的最高杠杆必须等于 {@code maxLeverage}
  */
 public record ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
-        VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals) {
+        VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals, MarginTiers marginTiers) {
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]*CRP");
     /** 没有配置点差时，点差取起始价格的这个比例。 */
     private static final double DEFAULT_SPREAD_RATIO = 0.0005;
@@ -48,8 +50,20 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
             throw new IllegalArgumentException(
                     "合约 " + symbol + " 的数量精度必须在 0 到 " + MAX_QUANTITY_DECIMALS + " 位之间：" + quantityDecimals);
         }
+        if (marginTiers == null) {
+            marginTiers = MarginTiers.standard(maxLeverage);
+        } else if (marginTiers.maxLeverage() != maxLeverage) {
+            throw new IllegalArgumentException("合约 " + symbol + " 的维持保证金分档第一档的最高杠杆（" + marginTiers.maxLeverage()
+                    + "）必须等于最高杠杆 " + maxLeverage);
+        }
         // 提前校验波动率倾向在模型里可以兑现，配置错了在加载时就报出来
         IndexModel.Calibration.of(symbol, initialPrice, volatility);
+    }
+
+    /** 维持保证金分档取默认值（按最高杠杆推出）。 */
+    public ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
+            VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals) {
+        this(symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals, null);
     }
 
     /** 交易参数取默认值：点差为起始价格的 0.05%，最高 20 倍杠杆，数量精度 3 位。 */
@@ -66,7 +80,7 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
 
     /** 界面下单需要知道的交易参数。 */
     public TradingParams trading() {
-        return new TradingParams(symbol, spread, maxLeverage, quantityDecimals);
+        return new TradingParams(symbol, spread, maxLeverage, quantityDecimals, marginTiers);
     }
 
     /** {@code lots} 手对应多少个标的资源。 */

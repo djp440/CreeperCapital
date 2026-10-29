@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -18,9 +19,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 
 /**
- * 下单面板（币安「市价」下单区）：选杠杆、填数量，点「开多」「开空」市价开仓，或点「平仓」市价平掉当前合约的仓位。
+ * 下单面板（币安「市价」下单区）：切逐仓 / 全仓、选杠杆、填数量，点「开多」「开空」市价开仓，或点「平仓」市价平掉当前合约的仓位。
  * <p>
- * 已有仓位时杠杆固定为仓位的杠杆（杠杆不能和仓位不同），「平仓」留空数量就是全平。面板上的预估成交价、保证金和手续费只是提示，
+ * 已有仓位时点杠杆的 − / + 是直接调整仓位的杠杆（加仓的杠杆必须和仓位一致），有仓位时不能切换保证金模式；
+ * 「平仓」留空数量就是全平。面板上的预估成交价、保证金和手续费只是提示，
  * 实际成交以服务端为准；下单结果（成交或拒单原因）由服务端回报，显示在面板底部。
  */
 final class OrderPanel {
@@ -38,6 +40,7 @@ final class OrderPanel {
     private final Font font;
     private final EditBox quantityBox;
     /** 每帧渲染时记下各按钮的区域，点击判定要用：{左, 上, 右, 下}。 */
+    private int[] modeBox = new int[4];
     private int[] minus = new int[4];
     private int[] plus = new int[4];
     private int[] buyBox = new int[4];
@@ -74,14 +77,18 @@ final class OrderPanel {
         int y = top + 6;
 
         graphics.text(font, Component.translatable("screen.creepercapital.trading.order.title"), x, y, BinancePalette.BRAND_YELLOW, false);
-        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.isolated"),
-                right - PAD - font.width(Component.translatable("screen.creepercapital.trading.order.isolated")), y,
-                BinancePalette.TEXT_SECONDARY, false);
+        // 保证金模式：点一下在「逐仓」「全仓」之间切换（有仓位或委托时服务端会拒绝并提示）
+        Component modeLabel = Component.translatable(ClientTrading.marginMode(symbol) == MarginMode.CROSS
+                ? "screen.creepercapital.trading.order.cross" : "screen.creepercapital.trading.order.isolated");
+        int modeWidth = font.width(modeLabel) + 10;
+        modeBox = new int[] {right - PAD - modeWidth, y - 3, right - PAD, y + font.lineHeight + 1};
+        graphics.fill(modeBox[0], modeBox[1], modeBox[2], modeBox[3],
+                inside(modeBox, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
+        graphics.centeredText(font, modeLabel, (modeBox[0] + modeBox[2]) / 2, y, BinancePalette.TEXT_PRIMARY);
         y += ROW + 2;
 
-        // 杠杆：「−」「倍数」「+」，已有仓位时固定
+        // 杠杆：「−」「倍数」「+」，有仓位时直接调整仓位的杠杆（受当前档位上限和可用保证金约束，由服务端校验）
         int leverage = ClientTrading.leverage(symbol);
-        boolean locked = position != null;
         graphics.text(font, Component.translatable("screen.creepercapital.trading.order.leverage"), x, y + 3, BinancePalette.TEXT_SECONDARY, false);
         String leverageText = leverage + "x";
         int plusLeft = right - PAD - STEP_BUTTON;
@@ -89,10 +96,9 @@ final class OrderPanel {
         int minusLeft = textRight - Math.max(font.width("125x"), font.width(leverageText)) - 4 - STEP_BUTTON;
         minus = new int[] {minusLeft, y, minusLeft + STEP_BUTTON, y + STEP_BUTTON};
         plus = new int[] {plusLeft, y, plusLeft + STEP_BUTTON, y + STEP_BUTTON};
-        stepButton(graphics, minus, "−", !locked && leverage > 1, mouseX, mouseY);
-        stepButton(graphics, plus, "+", !locked && params != null && leverage < params.maxLeverage(), mouseX, mouseY);
-        graphics.centeredText(font, leverageText, (minus[2] + plus[0]) / 2, y + 3,
-                locked ? BinancePalette.TEXT_SECONDARY : BinancePalette.TEXT_PRIMARY);
+        stepButton(graphics, minus, "−", leverage > 1, mouseX, mouseY);
+        stepButton(graphics, plus, "+", params != null && leverage < params.maxLeverage(), mouseX, mouseY);
+        graphics.centeredText(font, leverageText, (minus[2] + plus[0]) / 2, y + 3, BinancePalette.TEXT_PRIMARY);
         y += STEP_BUTTON + 4;
 
         // 数量：输入框右侧标出标的资源的名称作单位
@@ -206,6 +212,10 @@ final class OrderPanel {
 
     /** 处理一次点击；返回点击是否落在面板的按钮上（落在输入框上的点击交给输入框自己处理）。 */
     boolean mouseClicked(double x, double y, String symbol) {
+        if (inside(modeBox, x, y)) {
+            ClientTrading.toggleMarginMode(symbol);
+            return true;
+        }
         if (inside(minus, x, y)) {
             ClientTrading.lowerLeverage(symbol);
             return true;
