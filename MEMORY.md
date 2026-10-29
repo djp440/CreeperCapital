@@ -1,5 +1,14 @@
 # MEMORY
 
+## 2026-10-29 14:20 逼真行情模型与多合约的设计取舍（#7）
+
+- 指数价格在对数空间演化（恒正）：`ln P = ln F + 慢偏离 + 跳跃偏离`，强度由 `VolatilityProfile` 五个数闭式反推（`IndexModel.Calibration`），不靠调参；统计验收用固定种子 300 个市场日的样本（`IndexModelStatisticsTest`，容差写在断言里）。跳跃用户确认为「部分回吐」：瞬时到位，30% 永久计入基本面价值，其余半衰期 1.5 个市场小时回吐。
+- 每个合约有自己的 `MarketRandom` 流：`forContract(市场种子, 交易代码)`，增删合约不改变其他合约走势。`MarketSavedData` 读出后只是状态，要等 `ContractConfig` 读完配置再 `bind(specs)` 恢复成活市场；配置里去掉的合约状态留在存档（休眠），新加的从起始价格开始。#6 及以前的单合约存档用 `Codec.withAlternative` 兼容，读成 DIAMONDCRP。
+- 合约配置错误整份回退到内置合约、不覆盖用户的文件（见 ADR-0006）；改配置要重启生效。GameTest 里用 `ContractConfig.load(临时路径)` 测，不碰真实 `config/`。
+- 联机载荷（快照、K 线请求 / 历史）都带交易代码，`PROTOCOL_VERSION` 升到 "4"；客户端的合约列表由快照到达顺序推出，不另发包；服务端每个行情步每个合约发一个快照包。
+- 所有 GameTest 共用同一个活市场：别对它调 `ServerMarket.advance`，也别让暂停跨 tick；需要推进的测试自己 `new Market(seed, ContractSpec.defaults())`。
+- `/creeper dev market jump <合约> <百分比>`（OP）：15 表示 +15%，范围 [-99, 1000]；暂停中排队的跳跃随存档保存，恢复后在第一个行情步发生（`restart-e2e.ps1` 覆盖）。
+
 ## 2026-10-29 12:30 K 线的设计取舍（#6）
 
 - 只有「正在走的 1m」随 `MarketState` 存档，已收盘的写世界目录的只追加文件（见 ADR-0005）；启动时 `KlineStore.bind` 先 `discardAfter(存档市场时间)` 再读回，靠行情确定性重放对账，崩溃后也不缺不重。核心单测 `MarketKlinesTest` 覆盖干净重启和崩溃重启。

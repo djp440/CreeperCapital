@@ -11,6 +11,9 @@ import net.minecraft.network.codec.StreamCodec;
  * core 里的值类型不依赖 MC，它们的网络编解码统一写在适配层。
  */
 final class ModCodecs {
+    /** 合约的交易代码；长度上限防止恶意客户端发超长字符串。 */
+    static final StreamCodec<ByteBuf, String> SYMBOL = ByteBufCodecs.stringUtf8(64);
+
     static final StreamCodec<ByteBuf, CandlePeriod> PERIOD = ByteBufCodecs.VAR_INT.map(ModCodecs::periodAt, CandlePeriod::ordinal);
 
     static final StreamCodec<ByteBuf, Candle> CANDLE = StreamCodec.composite(

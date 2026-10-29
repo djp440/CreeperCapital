@@ -24,7 +24,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
     /** 可被截图的视图。新界面加入后在这里追加一个枚举值即可。 */
     public enum View {
         /** 交易界面。 */
-        TRADING(minecraft -> TradingScreen.open());
+        TRADING(minecraft -> TradingScreen.open()),
+        /** 交易界面，且合约下拉列表已展开。 */
+        CONTRACT_MENU(minecraft -> TradingScreen.openWithContractMenu());
 
         private final Consumer<Minecraft> opener;
 

@@ -20,5 +20,7 @@
   "screen.creepercapital.trading.kline.axis_day": "第%s日",
   "commands.creepercapital.market.paused": "市场已暂停",
   "commands.creepercapital.market.resumed": "市场已恢复",
-  "commands.creepercapital.market.advanced": "市场已快进 %s 个行情步"
+  "commands.creepercapital.market.advanced": "市场已快进 %s 个行情步",
+  "commands.creepercapital.market.jump": "%s 将在下一个行情步跳跃 %s%%",
+  "commands.creepercapital.market.jump.unknown": "没有这个合约：%s"
 }

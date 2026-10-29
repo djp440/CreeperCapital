@@ -1,13 +1,19 @@
 package io.github.djp440.creepercapital.core.market;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import io.github.djp440.creepercapital.core.kline.Klines;
-import io.github.djp440.creepercapital.core.kline.Retention;
 import io.github.djp440.creepercapital.core.kline.Stats24h;
 
 /**
- * 全服共享的市场，只由服务器 tick 推进（ADR-0003）。
+ * 全服共享的市场，只由服务器 tick 推进（ADR-0003）。市场里有若干个合约，共用同一个时钟和暂停状态，
+ * 但每个合约有自己的行情模型和随机数流，互不影响。
  */
 public final class Market {
     /** 每个行情步包含的服务器 tick 数。 */
@@ -15,94 +21,145 @@ public final class Market {
     /** 每个行情步跨越的市场秒数：1 真实秒对应 6 市场秒（ADR-0003）。 */
     static final int MARKET_SECONDS_PER_STEP = 6;
 
-    private static final String SYMBOL = "DIAMONDCRP";
-    private static final double INITIAL_INDEX_PRICE = 1000.0;
-
-    private final MarketRandom random;
-    private final RandomWalkIndexPrice indexPrice;
-    private final ContractPricing pricing;
-    private final Klines klines;
+    private final long seed;
+    /** 当前生效的合约，按配置顺序排列。 */
+    private final Map<String, ContractMarket> contracts = new LinkedHashMap<>();
+    /** 存档里有、配置里暂时没有的合约的状态：不推进，原样保存，重新加回配置后接着走。 */
+    private final List<ContractState> dormant;
+    private final List<JumpListener> jumpListeners = new ArrayList<>();
     private int ticksIntoStep;
     private long step;
     private boolean paused;
-    /** 最近一个行情步的成交量。 */
-    private double lastVolume;
 
     /**
-     * @param seed 行情随机数种子，同一种子走出同一条行情
+     * 新建市场。
+     *
+     * @param seed  行情随机数种子，同一种子和同一份合约定义走出同一条行情
+     * @param specs 合约定义，至少一个，交易代码不能重复
      */
-    public Market(long seed) {
-        this.random = new MarketRandom(seed);
-        this.indexPrice = new RandomWalkIndexPrice(INITIAL_INDEX_PRICE, random);
-        this.pricing = new ContractPricing(PricingState.INITIAL);
-        this.klines = new Klines(Retention.DEFAULT);
+    public Market(long seed, List<ContractSpec> specs) {
+        this.seed = seed;
+        this.dormant = List.of();
+        for (ContractSpec spec : checked(specs)) {
+            contracts.put(spec.symbol(), new ContractMarket(seed, spec));
+        }
     }
 
-    private Market(MarketState state) {
-        this.random = new MarketRandom(state.randomState());
-        this.indexPrice = new RandomWalkIndexPrice(state.indexPrice(), random);
-        this.pricing = new ContractPricing(state.pricing());
+    private Market(MarketState state, List<ContractSpec> specs) {
+        this.seed = state.seed();
         this.ticksIntoStep = state.ticksIntoStep();
         this.step = state.step();
         this.paused = state.paused();
-        this.lastVolume = state.lastVolume();
-        this.klines = new Klines(Retention.DEFAULT, state.liveMinute());
+        Map<String, ContractState> saved = new LinkedHashMap<>();
+        for (ContractState contract : state.contracts()) {
+            saved.put(contract.symbol(), contract);
+        }
+        for (ContractSpec spec : checked(specs)) {
+            ContractState contract = saved.remove(spec.symbol());
+            contracts.put(spec.symbol(),
+                    contract == null ? new ContractMarket(seed, spec) : new ContractMarket(spec, contract));
+        }
+        this.dormant = List.copyOf(saved.values());
     }
 
-    /** 从保存的状态恢复市场，接着停下的地方走，不补算停机期间的行情。 */
-    public static Market restore(MarketState state) {
-        return new Market(state);
+    private static List<ContractSpec> checked(List<ContractSpec> specs) {
+        if (specs.isEmpty()) {
+            throw new IllegalArgumentException("市场至少要有一个合约");
+        }
+        Set<String> symbols = new HashSet<>();
+        for (ContractSpec spec : specs) {
+            if (!symbols.add(spec.symbol())) {
+                throw new IllegalArgumentException("合约的交易代码重复：" + spec.symbol());
+            }
+        }
+        return specs;
     }
 
     /**
-     * 需要持久化的全部状态，包括是否暂停和正在走的 1m K 线。已收盘的 K 线不在其中，
+     * 从保存的状态恢复市场，接着停下的地方走，不补算停机期间的行情。
+     * 合约以 {@code specs}（当前配置）为准：配置里新加的合约从起始价格开始，配置里去掉的合约状态原样留在存档里。
+     */
+    public static Market restore(MarketState state, List<ContractSpec> specs) {
+        return new Market(state, specs);
+    }
+
+    /**
+     * 需要持久化的全部状态，包括是否暂停和每个合约正在走的 1m K 线。已收盘的 K 线不在其中，
      * 由宿主用 {@link io.github.djp440.creepercapital.core.kline.KlineStore#bind} 接到世界目录下的文件。
      */
     public MarketState state() {
-        return new MarketState(step, ticksIntoStep, indexPrice.current(), random.state(), paused, pricing.state(),
-                lastVolume, klines.liveMinute().orElse(null));
+        List<ContractState> states = new ArrayList<>();
+        for (ContractMarket contract : contracts.values()) {
+            states.add(contract.state());
+        }
+        states.addAll(dormant);
+        return new MarketState(seed, step, ticksIntoStep, paused, states);
+    }
+
+    /** 订阅跳跃事件（随机的和手动的），新闻文字从这里挂接。 */
+    public void addJumpListener(JumpListener listener) {
+        jumpListeners.add(listener);
     }
 
     /**
      * 推进一个服务器 tick。暂停时什么都不发生：行情步、价格、市场时间和 tick 计数全部冻结。
      *
-     * @return 这个 tick 恰好完成一个行情步时返回该步的快照，否则为空
+     * @return 这个 tick 恰好完成一个行情步时，返回该步每个合约的快照（按配置顺序）；否则为空
      */
-    public Optional<MarketSnapshot> tick() {
+    public List<MarketSnapshot> tick() {
         if (paused) {
-            return Optional.empty();
+            return List.of();
         }
         ticksIntoStep++;
         if (ticksIntoStep < TICKS_PER_STEP) {
-            return Optional.empty();
+            return List.of();
         }
         ticksIntoStep = 0;
-        MarketTime previous = MarketTime.ofStep(step);
         step++;
-        lastVolume = RandomWalkIndexPrice.volumeFor(indexPrice.next());
-        pricing.next(previous, MarketTime.ofStep(step), indexPrice.current(), random);
-        MarketSnapshot snapshot = snapshot();
-        klines.record(snapshot.time().totalSeconds(), snapshot.lastPrice(), snapshot.volume());
-        return Optional.of(snapshot);
+        List<MarketSnapshot> snapshots = new ArrayList<>(contracts.size());
+        for (ContractMarket contract : contracts.values()) {
+            snapshots.add(contract.next(step, this::fireJump));
+        }
+        return snapshots;
+    }
+
+    private void fireJump(JumpEvent event) {
+        for (JumpListener listener : jumpListeners) {
+            listener.jumped(event);
+        }
     }
 
     /**
      * 不等服务器 tick，直接推进若干个行情步，结果与逐 tick 推进完全相同（内部仍按 20 个 tick 凑一个行情步）。
      * 仅供开发命令快进行情用，正常运行时市场只由服务器 tick 推进（ADR-0003）。暂停时不前进。
      *
-     * @return 最后一步的快照；一步也没走时为空
+     * @return 最后一步每个合约的快照；一步也没走时为空
      */
-    public Optional<MarketSnapshot> advanceSteps(int steps) {
-        Optional<MarketSnapshot> last = Optional.empty();
+    public List<MarketSnapshot> advanceSteps(int steps) {
+        List<MarketSnapshot> last = List.of();
         int done = 0;
         while (done < steps && !paused) {
-            Optional<MarketSnapshot> snapshot = tick();
-            if (snapshot.isPresent()) {
-                last = snapshot;
+            List<MarketSnapshot> snapshots = tick();
+            if (!snapshots.isEmpty()) {
+                last = snapshots;
                 done++;
             }
         }
         return last;
+    }
+
+    /**
+     * 让某个合约在下一个行情步跳跃（{@code /creeper dev market jump}）。跳跃与那一步的日常波动一起生效，
+     * 并作为 {@link JumpEvent.Cause#MANUAL} 事件报告；排队的跳跃随市场状态保存。
+     *
+     * @param changeRatio 价格变化比例，+0.1 涨 10%，-0.2 跌 20%；必须大于 -1
+     * @throws IllegalArgumentException 没有这个合约，或幅度不合法
+     */
+    public void queueJump(String symbol, double changeRatio) {
+        if (!(changeRatio > -1) || !Double.isFinite(changeRatio)) {
+            throw new IllegalArgumentException("跳跃幅度必须是大于 -100% 的有限数：" + changeRatio);
+        }
+        contract(symbol).queueJump(changeRatio);
     }
 
     public void pause() {
@@ -117,19 +174,48 @@ public final class Market {
         return paused;
     }
 
-    public MarketSnapshot snapshot() {
-        double index = indexPrice.current();
-        return new MarketSnapshot(step, SYMBOL, index, pricing.lastPrice(index),
-                pricing.markPrice(index, MarketTime.ofStep(step)), pricing.fundingRate(), lastVolume);
+    /** 当前生效的合约的交易代码，按配置顺序。 */
+    public List<String> symbols() {
+        return List.copyOf(contracts.keySet());
     }
 
-    /** 本合约的 K 线（以最新价格计）。 */
-    public Klines klines() {
-        return klines;
+    public ContractSpec spec(String symbol) {
+        return contract(symbol).spec();
     }
 
-    /** 行情栏的 24h 统计，与 K 线数据一致；还没有行情步时为空。 */
-    public Optional<Stats24h> stats24h() {
-        return klines.stats24h();
+    public MarketSnapshot snapshot(String symbol) {
+        return contract(symbol).snapshot(step);
+    }
+
+    /** 每个合约此刻的快照，按配置顺序。 */
+    public List<MarketSnapshot> snapshots() {
+        List<MarketSnapshot> snapshots = new ArrayList<>(contracts.size());
+        for (ContractMarket contract : contracts.values()) {
+            snapshots.add(contract.snapshot(step));
+        }
+        return snapshots;
+    }
+
+    /** 某个合约的 K 线（以最新价格计）。 */
+    public Klines klines(String symbol) {
+        return contract(symbol).klines();
+    }
+
+    /** 某个合约行情栏的 24h 统计，与 K 线数据一致；还没有行情步时为空。 */
+    public Optional<Stats24h> stats24h(String symbol) {
+        return contract(symbol).stats24h();
+    }
+
+    /** 某个合约此刻的市场状态；供同包的统计测试核对溢价与市场状态的关系。 */
+    Regime regime(String symbol) {
+        return contract(symbol).regime();
+    }
+
+    private ContractMarket contract(String symbol) {
+        ContractMarket contract = contracts.get(symbol);
+        if (contract == null) {
+            throw new IllegalArgumentException("没有这个合约：" + symbol);
+        }
+        return contract;
     }
 }
