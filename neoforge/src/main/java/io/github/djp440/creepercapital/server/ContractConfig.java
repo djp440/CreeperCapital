@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -29,7 +30,10 @@ import io.github.djp440.creepercapital.core.market.VolatilityProfile;
 import net.neoforged.fml.loading.FMLPaths;
 
 /**
- * 合约的服务端配置文件 {@code config/creepercapital-contracts.json}：每个合约的标的资源、起始价格、基础成交量和波动率倾向。
+ * 合约的服务端配置文件 {@code config/creepercapital-contracts.json}：每个合约的标的资源、起始价格、基础成交量、波动率倾向和交易参数。
+ * <p>
+ * 点差（{@code spread}，CRP，默认起始价格的 0.05%）、最高杠杆（{@code max_leverage}，默认 20）和数量精度
+ * （{@code quantity_decimals}，默认 3 位）三项可以不写，写了就按写的算。
  * <p>
  * 文件不存在时按内置的两个合约（DIAMONDCRP、GUNPOWDERCRP）自动生成；改了文件，重启服务器后生效：
  * 市场的状态随存档保存，只有行情参数以文件为准，所以改波动率倾向不会让价格跳变。
@@ -54,8 +58,15 @@ public final class ContractConfig {
             Codec.STRING.fieldOf("underlying").forGetter(ContractSpec::underlying),
             Codec.DOUBLE.fieldOf("initial_price").forGetter(ContractSpec::initialPrice),
             Codec.DOUBLE.fieldOf("base_volume").forGetter(ContractSpec::baseVolume),
-            VOLATILITY_CODEC.fieldOf("volatility").forGetter(ContractSpec::volatility))
-            .apply(i, ContractSpec::new));
+            VOLATILITY_CODEC.fieldOf("volatility").forGetter(ContractSpec::volatility),
+            Codec.DOUBLE.optionalFieldOf("spread").forGetter(spec -> Optional.of(spec.spread())),
+            Codec.INT.optionalFieldOf("max_leverage").forGetter(spec -> Optional.of(spec.maxLeverage())),
+            Codec.INT.optionalFieldOf("quantity_decimals").forGetter(spec -> Optional.of(spec.quantityDecimals())))
+            .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals) ->
+                    new ContractSpec(symbol, underlying, initialPrice, baseVolume, volatility,
+                            spread.orElseGet(() -> ContractSpec.defaultSpread(initialPrice)),
+                            maxLeverage.orElse(ContractSpec.DEFAULT_MAX_LEVERAGE),
+                            quantityDecimals.orElse(ContractSpec.DEFAULT_QUANTITY_DECIMALS))));
 
     private ContractConfig() {
     }

@@ -21,7 +21,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 /**
  * {@code /creeper}：为执行命令的玩家打开交易界面；{@code /creeper dev ...} 是仅限 OP 的开发命令
- * （暂停/恢复市场，把行情快进若干步，方便查看 K 线和做自动截图，让某个合约跳跃，以及给合约账户充值、扣除 CRP）。
+ * （暂停/恢复市场，把行情快进若干步，方便查看 K 线和做自动截图，让某个合约跳跃，给合约账户充值、扣除 CRP，以及给流动性池注资）。
  */
 public final class CreeperCommand {
     /** 一次快进最多的行情步数，约 10 个市场日。 */
@@ -53,6 +53,10 @@ public final class CreeperCommand {
                                 .then(Commands.argument("player", GameProfileArgument.gameProfile())
                                         .then(Commands.argument("amount", StringArgumentType.word())
                                                 .executes(context -> adjust(context, false)))))
+                        .then(Commands.literal("pool")
+                                .then(Commands.literal("fund")
+                                        .then(Commands.argument("amount", StringArgumentType.word())
+                                                .executes(CreeperCommand::fundPool))))
                         .then(Commands.literal("market")
                                 .then(Commands.literal("pause").executes(context -> {
                                     ServerMarket.pause();
@@ -127,6 +131,31 @@ public final class CreeperCommand {
             }
         }
         return done;
+    }
+
+    /** {@code /creeper dev pool fund <数量>}：给流动性池注资（凭空增加池子的资金，仅供开发测试）。 */
+    private static int fundPool(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        String text = StringArgumentType.getString(context, "amount");
+        Money amount;
+        try {
+            amount = Money.parse(text);
+            if (!amount.isPositive()) {
+                throw new IllegalArgumentException("数量必须为正");
+            }
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.translatable("commands.creepercapital.account.invalid_amount", text));
+            return 0;
+        }
+        try {
+            Money balance = ServerTrading.fundPool(amount);
+            source.sendSuccess(() -> Component.translatable("commands.creepercapital.pool.funded",
+                    amount.toDisplayString(), balance.toDisplayString()), true);
+            return Command.SINGLE_SUCCESS;
+        } catch (ArithmeticException e) {
+            source.sendFailure(Component.translatable("commands.creepercapital.pool.overflow"));
+            return 0;
+        }
     }
 
     /** {@code /creeper dev market jump <合约> <百分比>}：在下一个行情步让该合约的价格跳变，+15 涨 15%，-20 跌 20%。 */

@@ -140,6 +140,7 @@ public final class MarketGameTests {
                 throw new UncheckedIOException(e);
             }
         });
+        TradingGameTests.register(MarketGameTests::function);
         FUNCTIONS.register(modBus);
         modBus.addListener(MarketGameTests::registerTests);
     }

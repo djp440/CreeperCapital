@@ -3,7 +3,14 @@ package io.github.djp440.creepercapital.network;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.kline.Stats24h;
+import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.PlayerTrade;
+import io.github.djp440.creepercapital.core.trading.Position;
+import io.github.djp440.creepercapital.core.trading.Side;
+import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 
@@ -24,6 +31,44 @@ final class ModCodecs {
             ByteBufCodecs.DOUBLE, Candle::close,
             ByteBufCodecs.DOUBLE, Candle::volume,
             Candle::new);
+
+    /** 金额以最小单位的整数传输，无浮点误差。 */
+    static final StreamCodec<ByteBuf, Money> MONEY = ByteBufCodecs.VAR_LONG.map(Money::ofUnits, Money::units);
+
+    static final StreamCodec<ByteBuf, Side> SIDE = ByteBufCodecs.VAR_INT.map(ordinal -> Side.values()[Math.floorMod(ordinal, Side.values().length)], Side::ordinal);
+
+    static final StreamCodec<ByteBuf, TradeKind> TRADE_KIND =
+            ByteBufCodecs.VAR_INT.map(ordinal -> TradeKind.values()[Math.floorMod(ordinal, TradeKind.values().length)], TradeKind::ordinal);
+
+    static final StreamCodec<ByteBuf, Position> POSITION = StreamCodec.composite(
+            SYMBOL, Position::symbol,
+            SIDE, Position::side,
+            ByteBufCodecs.VAR_LONG, Position::lots,
+            ByteBufCodecs.DOUBLE, Position::entryPrice,
+            ByteBufCodecs.VAR_INT, Position::leverage,
+            MONEY, Position::margin,
+            ByteBufCodecs.VAR_INT, Position::quantityDecimals,
+            Position::new);
+
+    static final StreamCodec<ByteBuf, PlayerTrade> TRADE = StreamCodec.composite(
+            ByteBufCodecs.VAR_LONG, PlayerTrade::id,
+            UUIDUtil.STREAM_CODEC, PlayerTrade::player,
+            SYMBOL, PlayerTrade::symbol,
+            SIDE, PlayerTrade::side,
+            TRADE_KIND, PlayerTrade::kind,
+            ByteBufCodecs.DOUBLE, PlayerTrade::price,
+            ByteBufCodecs.VAR_LONG, PlayerTrade::lots,
+            MONEY, PlayerTrade::fee,
+            MONEY, PlayerTrade::realizedPnl,
+            ByteBufCodecs.VAR_LONG, PlayerTrade::marketSeconds,
+            PlayerTrade::new);
+
+    static final StreamCodec<ByteBuf, TradingParams> TRADING_PARAMS = StreamCodec.composite(
+            SYMBOL, TradingParams::symbol,
+            ByteBufCodecs.DOUBLE, TradingParams::spread,
+            ByteBufCodecs.VAR_INT, TradingParams::maxLeverage,
+            ByteBufCodecs.VAR_INT, TradingParams::quantityDecimals,
+            TradingParams::new);
 
     static final StreamCodec<ByteBuf, Stats24h> STATS_24H = StreamCodec.composite(
             ByteBufCodecs.DOUBLE, Stats24h::open,

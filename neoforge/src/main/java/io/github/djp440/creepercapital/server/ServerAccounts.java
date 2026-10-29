@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.network.AccountPayload;
@@ -18,7 +19,7 @@ import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 
 /**
- * 服务端的合约账户：余额随世界存档保存（{@link AccountSavedData}），玩家离线也能充值、扣除。
+ * 服务端的合约账户：可用余额随世界存档保存（{@link AccountSavedData}），玩家离线也能充值、扣除。
  * 余额变动后立即把最新资产同步给在线的该玩家，登录时也同步一次。
  */
 public final class ServerAccounts {
@@ -33,13 +34,19 @@ public final class ServerAccounts {
         NeoForge.EVENT_BUS.addListener(ServerAccounts::onPlayerLoggedIn);
     }
 
+    /** 玩家的可用余额（不含仓位占用的保证金）。 */
     public static Money balance(UUID player) {
         return data().book().balance(player);
     }
 
-    /** 此刻这名玩家的资产；还没有仓位，所以只由钱包余额决定。 */
+    /** 账本，交易账用它划转保证金与盈亏。 */
+    static AccountBook book() {
+        return data().book();
+    }
+
+    /** 此刻这名玩家的资产，含仓位的保证金与未实现盈亏。 */
     public static Assets assets(UUID player) {
-        return Assets.ofWallet(balance(player));
+        return ServerTrading.assets(player);
     }
 
     /**

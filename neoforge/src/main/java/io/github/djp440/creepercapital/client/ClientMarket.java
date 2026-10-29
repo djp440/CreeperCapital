@@ -76,6 +76,11 @@ public final class ClientMarket {
         ClientKlines.onContractSelected();
     }
 
+    /** 某个合约的最新快照；还没收到过它的行情时为空。 */
+    public static Optional<MarketSnapshot> snapshot(String symbol) {
+        return Optional.ofNullable(LATEST.get(symbol));
+    }
+
     /** 选中合约的最新快照。 */
     public static Optional<MarketSnapshot> latest() {
         return selected == null ? Optional.empty() : Optional.ofNullable(LATEST.get(selected));
