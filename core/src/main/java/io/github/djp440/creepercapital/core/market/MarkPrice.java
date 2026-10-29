@@ -1,7 +1,7 @@
 package io.github.djp440.creepercapital.core.market;
 
 /**
- * 标记价格（币安公式）：取三个候选价的中位数，抗短时操纵。
+ * 标记价格：取三个候选价的中位数，抗短时操纵。
  */
 public final class MarkPrice {
     private MarkPrice() {

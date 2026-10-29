@@ -1,19 +1,19 @@
 package io.github.djp440.creepercapital.client;
 
 /**
- * 币安深色主题的界面配色（ARGB）。
+ * 深色主题的界面配色（ARGB）。
  * <p>
  * 涨跌语义（涨 / 买 / 多 / 盈利，跌 / 卖 / 空 / 亏损）一律经 {@link #up()}、{@link #down()} 及其派生方法取色，
  * 它们按客户端配置的 {@link ColorScheme} 在绿、红之间切换；不要在界面代码里直接用 {@link #GREEN}、{@link #RED}。
  */
-final class BinancePalette {
+final class TradingPalette {
     static final int BACKGROUND = 0xFF0B0E11;
     static final int PANEL = 0xFF181A20;
     static final int DIVIDER = 0xFF2B3139;
     static final int TEXT_PRIMARY = 0xFFEAECEF;
     static final int TEXT_SECONDARY = 0xFF848E9C;
     static final int BRAND_YELLOW = 0xFFF0B90B;
-    /** 币安的绿、红两种涨跌色，只由 {@link ColorScheme} 引用。 */
+    /** 绿、红两种涨跌色，只由 {@link ColorScheme} 引用。 */
     static final int GREEN = 0xFF0ECB81;
     static final int RED = 0xFFF6465D;
     /** 下单失败、本地校验不过等错误提示：与涨跌无关，两种方案下都是红色。 */
@@ -33,7 +33,7 @@ final class BinancePalette {
     static final int MA_25 = 0xFFE05CF0;
     static final int MA_99 = 0xFF4C9BE8;
 
-    private BinancePalette() {
+    private TradingPalette() {
     }
 
     /** 涨、买入、做多、盈利的颜色。 */

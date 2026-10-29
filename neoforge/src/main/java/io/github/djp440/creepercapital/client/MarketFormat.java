@@ -18,7 +18,7 @@ final class MarketFormat {
     private static final DecimalFormat PRICE = new DecimalFormat("#,##0.00", SYMBOLS);
     private static final DecimalFormat SIGNED_PRICE = new DecimalFormat("+#,##0.00;-#,##0.00", SYMBOLS);
     private static final DecimalFormat SIGNED_PERCENT = new DecimalFormat("+0.00%;-0.00%", SYMBOLS);
-    /** 资金费率按币安的习惯显示为百分数、保留 4 位小数，例如 0.0100%。 */
+    /** 资金费率显示为百分数、保留 4 位小数，例如 0.0100%。 */
     private static final DecimalFormat FUNDING_RATE = new DecimalFormat("0.0000%", SYMBOLS);
     /** 金额（CRP）：表格和下单面板统一保留 2 位小数；手续费常常不到 0.01，最多保留 4 位。 */
     private static final DecimalFormat MONEY = rounded("#,##0.00");

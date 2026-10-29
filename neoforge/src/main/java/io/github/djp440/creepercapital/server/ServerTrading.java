@@ -197,7 +197,7 @@ public final class ServerTrading {
         OrderPayload.Action action = order.action();
         boolean limit = order.execution() == OrderPayload.Execution.LIMIT;
         if (order.reduceOnly() && (action == OrderPayload.Action.OPEN_LONG || action == OrderPayload.Action.OPEN_SHORT)) {
-            // 开多 / 开空是买入 / 卖出：带只减仓就是缩减反向的仓位，没有可缩减的仓位就拒绝（币安同样拒绝），绝不开仓
+            // 开多 / 开空是买入 / 卖出：带只减仓就是缩减反向的仓位，没有可缩减的仓位就拒绝（同样拒绝），绝不开仓
             Position position = book().position(id, spec.symbol()).orElse(null);
             if (position == null || position.side() == side) {
                 return TradeResult.reject(TradeResult.Reason.NO_POSITION);

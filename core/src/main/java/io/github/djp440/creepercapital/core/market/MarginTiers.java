@@ -8,10 +8,10 @@ import java.util.List;
 import io.github.djp440.creepercapital.core.account.Money;
 
 /**
- * 一个合约按名义价值分档的维持保证金与杠杆上限（照搬币安 USDⓈ-M 合约的分档结构）。
+ * 一个合约按名义价值分档的维持保证金与杠杆上限（分档结构同主流 USDT 本位永续合约）。
  * <p>
  * 每一档管名义价值区间 (上一档上界, 本档上界]：区间内的仓位适用本档的最高杠杆与维持保证金率；
- * 维持保证金 = 名义价值 × 维持保证金率 − 速算额，速算额由各档的费率差累计而来（与币安表里的 “Maintenance Amount” 同义），
+ * 维持保证金 = 名义价值 × 维持保证金率 − 速算额，速算额由各档的费率差累计而来（即 “Maintenance Amount”），
  * 这样跨档时维持保证金连续、不会在档位边界跳变。最后一档的上界就是单个仓位的名义价值上限。
  * <p>
  * 这是维持保证金、保证金率和强平价（见 {@code MarginMath}）的唯一数据来源，下单、调杠杆、界面展示和强平都读它。
@@ -24,7 +24,7 @@ public final class MarginTiers {
 
     /** 默认分档的各档上界占最高名义价值的比例：1%、5%、20%、50%、100%。 */
     private static final double[] DEFAULT_BOUND_RATIOS = {0.01, 0.05, 0.20, 0.50, 1.0};
-    /** 默认分档的各档杠杆上限占合约最高杠杆的比例；125x 时恰好是币安 BTC 的 125/100/50/20/10。 */
+    /** 默认分档的各档杠杆上限占合约最高杠杆的比例；125x 时恰好是 125/100/50/20/10。 */
     private static final double[] DEFAULT_LEVERAGE_RATIOS = {1.0, 0.8, 0.4, 0.16, 0.08};
 
     /**
@@ -105,7 +105,7 @@ public final class MarginTiers {
 
     /**
      * 合约没有配置分档时的默认分档：五档，名义价值上界为 {@link #DEFAULT_MAX_NOTIONAL} 的 1%、5%、20%、50%、100%，
-     * 各档最高杠杆是合约最高杠杆的 100%、80%、40%、16%、8%，维持保证金率取 1 / (2 × 本档杠杆)（币安各档杠杆与费率的对应关系）。
+     * 各档最高杠杆是合约最高杠杆的 100%、80%、40%、16%、8%，维持保证金率取 1 / (2 × 本档杠杆)（各档杠杆与费率的对应关系）。
      */
     public static MarginTiers standard(int maxLeverage) {
         List<Definition> definitions = new ArrayList<>();

@@ -26,10 +26,10 @@ final class TabStrip {
             int width = font.width(labels[i]) + padding * 2;
             boxes[i] = new int[] {x, top, x + width, top + height};
             boolean hovered = mouseX >= x && mouseX < x + width && mouseY >= top && mouseY < top + height;
-            int color = i == selected ? BinancePalette.BRAND_YELLOW : hovered ? BinancePalette.TEXT_PRIMARY : BinancePalette.TEXT_SECONDARY;
+            int color = i == selected ? TradingPalette.BRAND_YELLOW : hovered ? TradingPalette.TEXT_PRIMARY : TradingPalette.TEXT_SECONDARY;
             graphics.text(font, labels[i], x + padding, GuiText.centeredY(font, top, top + height), color, false);
             if (i == selected) {
-                graphics.horizontalLine(x + padding, x + width - padding - 1, top + height - 1, BinancePalette.BRAND_YELLOW);
+                graphics.horizontalLine(x + padding, x + width - padding - 1, top + height - 1, TradingPalette.BRAND_YELLOW);
             }
             x += width;
         }

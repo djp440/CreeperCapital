@@ -83,7 +83,7 @@ final class TradeTables {
         }
 
         static Cell button(String label, Runnable action) {
-            return new Cell(label, BinancePalette.TEXT_PRIMARY, -1, action);
+            return new Cell(label, TradingPalette.TEXT_PRIMARY, -1, action);
         }
     }
 
@@ -131,27 +131,27 @@ final class TradeTables {
             double mark = snapshot == null ? position.entryPrice() : snapshot.markPrice();
             Money pnl = position.pnlAt(mark);
             double roe = position.returnOnEquity(mark);
-            int sideColor = BinancePalette.side(position.side() == Side.LONG);
+            int sideColor = TradingPalette.side(position.side() == Side.LONG);
             String mode = Component.translatable(position.mode() == MarginMode.CROSS
                     ? "screen.creepercapital.trading.order.cross" : "screen.creepercapital.trading.order.isolated").getString();
             MarginMath.PositionRisk risk = risks.get(position.symbol());
             double ratio = risk == null ? 0 : risk.marginRatio();
             // 保证金率越高越危险：50% 起品牌黄提醒，80% 起用亏损色（跟随涨跌色方案）
-            int ratioColor = ratio >= 0.8 ? BinancePalette.down() : ratio >= 0.5 ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_PRIMARY;
+            int ratioColor = ratio >= 0.8 ? TradingPalette.down() : ratio >= 0.5 ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_PRIMARY;
             String liquidation = risk == null || risk.liquidationPrice().isEmpty() ? "--"
                     : MarketFormat.price(risk.liquidationPrice().getAsDouble());
             String symbol = position.symbol();
             columns.add(
                     Cell.text(symbol, sideColor),
-                    Cell.text(mode + " " + position.leverage() + "x", BinancePalette.TEXT_SECONDARY),
+                    Cell.text(mode + " " + position.leverage() + "x", TradingPalette.TEXT_SECONDARY),
                     Cell.text(Quantities.format(position.lots(), position.quantityDecimals()), sideColor),
-                    Cell.text(MarketFormat.price(position.entryPrice()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.price(mark), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(liquidation, BinancePalette.BRAND_YELLOW),
+                    Cell.text(MarketFormat.price(position.entryPrice()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.price(mark), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(liquidation, TradingPalette.BRAND_YELLOW),
                     Cell.text(MarginMath.formatRatio(ratio), ratioColor),
-                    Cell.text(MarketFormat.money(position.margin()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.signedMoney(pnl), BinancePalette.signed(pnl.units())),
-                    Cell.text(MarketFormat.signedPercent(roe), BinancePalette.signed(roe)),
+                    Cell.text(MarketFormat.money(position.margin()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.signedMoney(pnl), TradingPalette.signed(pnl.units())),
+                    Cell.text(MarketFormat.signedPercent(roe), TradingPalette.signed(roe)),
                     Cell.lights(ClientTrading.adlLights(symbol)),
                     Cell.button(close, () -> ClientTrading.position(symbol)
                             .ifPresent(held -> ClientTrading.send(OrderPayload.Action.CLOSE, symbol, held.lots()))));
@@ -168,20 +168,20 @@ final class TradeTables {
             int decimals = ClientTrading.params(trade.symbol()).map(p -> p.quantityDecimals()).orElse(0);
             boolean opensLong = (trade.side() == Side.LONG) == (trade.kind() == TradeKind.OPEN);
             // 强平和自动减仓用品牌黄色，一眼和主动平仓区分开
-            int sideColor = trade.kind() == TradeKind.LIQUIDATION || trade.kind() == TradeKind.ADL ? BinancePalette.BRAND_YELLOW
-                    : BinancePalette.side(opensLong);
+            int sideColor = trade.kind() == TradeKind.LIQUIDATION || trade.kind() == TradeKind.ADL ? TradingPalette.BRAND_YELLOW
+                    : TradingPalette.side(opensLong);
             columns.add(
-                    Cell.text(MarketFormat.marketTime(new MarketTime(trade.marketSeconds())), BinancePalette.TEXT_SECONDARY),
-                    Cell.text(trade.symbol(), BinancePalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.marketTime(new MarketTime(trade.marketSeconds())), TradingPalette.TEXT_SECONDARY),
+                    Cell.text(trade.symbol(), TradingPalette.TEXT_PRIMARY),
                     Cell.text(Component.translatable("screen.creepercapital.trading.trade_side."
                             + trade.kind().name().toLowerCase(Locale.ROOT) + "_" + trade.side().name().toLowerCase(Locale.ROOT))
                             .getString(), sideColor),
-                    Cell.text(MarketFormat.price(trade.price()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(Quantities.format(trade.lots(), decimals), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.fee(trade.fee()), BinancePalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.price(trade.price()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(Quantities.format(trade.lots(), decimals), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.fee(trade.fee()), TradingPalette.TEXT_PRIMARY),
                     Cell.text(trade.kind() == TradeKind.OPEN ? "--" : MarketFormat.signedMoney(trade.realizedPnl()),
-                            trade.kind() == TradeKind.OPEN ? BinancePalette.TEXT_SECONDARY
-                                    : BinancePalette.signed(trade.realizedPnl().units())));
+                            trade.kind() == TradeKind.OPEN ? TradingPalette.TEXT_SECONDARY
+                                    : TradingPalette.signed(trade.realizedPnl().units())));
         }
         LayoutFit.Columns fit = header(graphics, top, columns, "time", "symbol", "side", "price", "quantity", "fee", "realized_pnl");
         body(graphics, top + HEADER_HEIGHT, bottom, columns, fit, "screen.creepercapital.trading.trades.empty", mouseX, mouseY);
@@ -194,16 +194,16 @@ final class TradeTables {
         for (FundingRecord record : ClientTrading.fundingNewestFirst()) {
             boolean shortfall = record.shortfall().isPositive();
             columns.add(
-                    Cell.text(MarketFormat.marketTime(new MarketTime(record.marketSeconds())), BinancePalette.TEXT_SECONDARY),
-                    Cell.text(record.symbol(), BinancePalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.marketTime(new MarketTime(record.marketSeconds())), TradingPalette.TEXT_SECONDARY),
+                    Cell.text(record.symbol(), TradingPalette.TEXT_PRIMARY),
                     Cell.text(Component.translatable("screen.creepercapital.trading.side."
-                            + record.side().name().toLowerCase(Locale.ROOT)).getString(), BinancePalette.side(record.side() == Side.LONG)),
-                    Cell.text(MarketFormat.fundingRate(record.rate()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.price(record.markPrice()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.money(record.notional()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(MarketFormat.signedMoney(record.amount()), BinancePalette.signed(record.amount().units())),
+                            + record.side().name().toLowerCase(Locale.ROOT)).getString(), TradingPalette.side(record.side() == Side.LONG)),
+                    Cell.text(MarketFormat.fundingRate(record.rate()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.price(record.markPrice()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.money(record.notional()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.signedMoney(record.amount()), TradingPalette.signed(record.amount().units())),
                     Cell.text(shortfall ? MarketFormat.money(record.shortfall()) : "--",
-                            shortfall ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_SECONDARY));
+                            shortfall ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_SECONDARY));
         }
         LayoutFit.Columns fit = header(graphics, top, columns, "time", "symbol", "side", "funding_rate", "mark_price", "notional",
                 "funding_amount", "funding_short");
@@ -218,9 +218,9 @@ final class TradeTables {
             long id = order.id();
             Cell[] head = orderCells(order, order.createdSeconds());
             columns.add(head[0], head[1], head[2], head[3],
-                    Cell.text(MarketFormat.price(order.price()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(Quantities.format(order.lots(), decimalsOf(order)), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(order.frozen().isPositive() ? MarketFormat.money(order.frozen()) : "--", BinancePalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.price(order.price()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(Quantities.format(order.lots(), decimalsOf(order)), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(order.frozen().isPositive() ? MarketFormat.money(order.frozen()) : "--", TradingPalette.TEXT_PRIMARY),
                     Cell.button(cancel, () -> ClientTrading.cancel(id)));
         }
         LayoutFit.Columns fit = header(graphics, top, columns, "time", "symbol", "side", "type", "order_price", "quantity", "frozen",
@@ -238,12 +238,12 @@ final class TradeTables {
                     : order.cancelReason() == CancelReason.LIQUIDATED ? "liquidated" : "cancelled";
             Cell[] head = orderCells(order, order.closedSeconds());
             columns.add(head[0], head[1], head[2], head[3],
-                    Cell.text(MarketFormat.price(order.price()), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(filled ? MarketFormat.price(order.fillPrice()) : "--", BinancePalette.TEXT_PRIMARY),
-                    Cell.text(Quantities.format(order.lots(), decimalsOf(order)), BinancePalette.TEXT_PRIMARY),
-                    Cell.text(filled ? MarketFormat.fee(order.fee()) : "--", BinancePalette.TEXT_PRIMARY),
+                    Cell.text(MarketFormat.price(order.price()), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(filled ? MarketFormat.price(order.fillPrice()) : "--", TradingPalette.TEXT_PRIMARY),
+                    Cell.text(Quantities.format(order.lots(), decimalsOf(order)), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(filled ? MarketFormat.fee(order.fee()) : "--", TradingPalette.TEXT_PRIMARY),
                     Cell.text(Component.translatable("screen.creepercapital.trading.order_status." + statusKey).getString(),
-                            filled ? BinancePalette.TEXT_PRIMARY : BinancePalette.TEXT_SECONDARY));
+                            filled ? TradingPalette.TEXT_PRIMARY : TradingPalette.TEXT_SECONDARY));
         }
         LayoutFit.Columns fit = header(graphics, top, columns, "time", "symbol", "side", "type", "order_price", "fill_price", "quantity",
                 "fee", "status");
@@ -257,11 +257,11 @@ final class TradeTables {
     private static Cell[] orderCells(Order order, long marketSeconds) {
         String kind = order.reduceOnly() ? "close_" : "open_";
         return new Cell[] {
-                Cell.text(MarketFormat.marketTime(new MarketTime(marketSeconds)), BinancePalette.TEXT_SECONDARY),
-                Cell.text(order.symbol(), BinancePalette.TEXT_PRIMARY),
+                Cell.text(MarketFormat.marketTime(new MarketTime(marketSeconds)), TradingPalette.TEXT_SECONDARY),
+                Cell.text(order.symbol(), TradingPalette.TEXT_PRIMARY),
                 Cell.text(Component.translatable("screen.creepercapital.trading.trade_side." + kind
-                        + order.side().name().toLowerCase(Locale.ROOT)).getString(), BinancePalette.side(order.side() == Side.LONG)),
-                Cell.text(typeLabel(order), BinancePalette.TEXT_PRIMARY)};
+                        + order.side().name().toLowerCase(Locale.ROOT)).getString(), TradingPalette.side(order.side() == Side.LONG)),
+                Cell.text(typeLabel(order), TradingPalette.TEXT_PRIMARY)};
     }
 
     static String typeLabel(Order order) {
@@ -309,7 +309,7 @@ final class TradeTables {
         LayoutFit.Columns fit = LayoutFit.columns(columns.left, columns.right, COLUMN_GAP, natural, columns.priority);
         for (int i = 0; i < keys.length; i++) {
             if (fit.visible(i)) {
-                graphics.text(font, GuiText.fit(font, titles[i], fit.width()[i]), fit.x()[i], top + 2, BinancePalette.TEXT_SECONDARY,
+                graphics.text(font, GuiText.fit(font, titles[i], fit.width()[i]), fit.x()[i], top + 2, TradingPalette.TEXT_SECONDARY,
                         false);
             }
         }
@@ -328,7 +328,7 @@ final class TradeTables {
             int mouseX, int mouseY) {
         if (grid.rows.isEmpty()) {
             graphics.centeredText(font, Component.translatable(emptyKey), (grid.left + grid.right) / 2,
-                    GuiText.centeredY(font, top, bottom), BinancePalette.TEXT_SECONDARY);
+                    GuiText.centeredY(font, top, bottom), TradingPalette.TEXT_SECONDARY);
             return;
         }
         int visibleRows = Math.max(1, (bottom - top) / ROW_HEIGHT);
@@ -337,7 +337,7 @@ final class TradeTables {
             Cell[] row = grid.rows.get(scroll + i);
             int y = top + i * ROW_HEIGHT;
             if (mouseX >= grid.left && mouseX < grid.right && mouseY >= y && mouseY < y + ROW_HEIGHT) {
-                graphics.fill(grid.left - 4, y, grid.right + 4, y + ROW_HEIGHT, BinancePalette.HOVER);
+                graphics.fill(grid.left - 4, y, grid.right + 4, y + ROW_HEIGHT, TradingPalette.HOVER);
             }
             for (int c = 0; c < row.length; c++) {
                 if (fit.visible(c)) {
@@ -357,9 +357,9 @@ final class TradeTables {
                     cell.action());
             boolean hovered = button.contains(mouseX, mouseY);
             graphics.fill(button.left(), button.top(), button.right(), button.bottom(),
-                    hovered ? BinancePalette.BUTTON_HOVER : BinancePalette.BUTTON);
+                    hovered ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
             graphics.text(font, GuiText.fit(font, cell.text(), button.right() - button.left() - BUTTON_PADDING * 2),
-                    x + BUTTON_PADDING, y + 2, BinancePalette.TEXT_PRIMARY, false);
+                    x + BUTTON_PADDING, y + 2, TradingPalette.TEXT_PRIMARY, false);
             buttons.add(button);
             return;
         }
@@ -375,7 +375,7 @@ final class TradeTables {
         for (int i = 0; i < AdlRanking.LIGHTS; i++) {
             int left = x + i * (LIGHT_WIDTH + 1);
             graphics.fill(left, bottom - (2 + 2 * i), left + LIGHT_WIDTH, bottom,
-                    i < lit ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
+                    i < lit ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
         }
     }
 }

@@ -113,12 +113,12 @@ class LangFilesTest {
     }
 
     /**
-     * 中文界面里本来就没有汉字的键：纯格式（只有参数和符号）与币安中文版同样直接写缩写的列名（ADL）。
+     * 中文界面里本来就没有汉字的键：纯格式（只有参数和符号）同样直接写缩写的列名（ADL）。
      * 新增这类键时在这里登记并写明原因，别为了过检查随便塞进来。
      */
     private static final Set<String> NEUTRAL_IN_ZH = Set.of(
             TRADING + "order.holding_short", // 仅 “方向 合约 · 杠杆” 三个参数
-            TRADING + "column.adl");         // 列名缩写，币安中文版同样写 ADL
+            TRADING + "column.adl");         // 列名缩写，直接写 ADL
 
     @Test
     void placeholdersAreConsistentBetweenLanguages() {

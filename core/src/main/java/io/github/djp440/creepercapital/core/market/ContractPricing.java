@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 /**
- * 双层定价（ADR-0002）：在指数价格上叠加溢价得到最新价格，再按币安公式推导资金费率和标记价格。
+ * 双层定价（ADR-0002）：在指数价格上叠加溢价得到最新价格，再按标准永续合约公式推导资金费率和标记价格。
  * <p>
  * 溢价是围绕「偏移目标」的均值回归随机过程（离散 Ornstein-Uhlenbeck），半衰期 1 市场小时，平稳标准差约 0.1%；
  * 偏移目标随市场状态变化：牛市偏正，熊市偏负，震荡围绕 0（幅度见 {@link VolatilityProfile#premiumBias()}）。
@@ -18,7 +18,7 @@ final class ContractPricing {
     private static final double STEP_VOLATILITY =
             STATIONARY_DEVIATION * Math.sqrt(1 - (1 - REVERSION) * (1 - REVERSION));
 
-    /** 基差每市场分钟采样一次，移动平均取最近 30 分钟（币安公式）。 */
+    /** 基差每市场分钟采样一次，移动平均取最近 30 分钟。 */
     private static final long BASIS_SAMPLE_SECONDS = 60;
     private static final int BASIS_WINDOW = 30;
 

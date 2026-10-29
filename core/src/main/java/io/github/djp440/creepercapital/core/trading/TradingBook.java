@@ -53,7 +53,7 @@ public final class TradingBook {
     public static final int MAX_FUNDING_PER_PLAYER = 200;
 
     private static final BigDecimal TAKER_FEE = BigDecimal.valueOf(TAKER_FEE_RATE);
-    /** 清算费率：强平时按标记价格算的名义价值的 0.5%（币安按合约分档，这里取一个常量）。清算费从玩家剩余的保证金里收，进风险保障基金。 */
+    /** 清算费率：强平时按标记价格算的名义价值的 0.5%（不随合约与档位变化，取常量）。清算费从玩家剩余的保证金里收，进风险保障基金。 */
     public static final double LIQUIDATION_FEE_RATE = 0.005;
 
     private static final BigDecimal MAKER_FEE = BigDecimal.valueOf(MAKER_FEE_RATE);
@@ -134,7 +134,7 @@ public final class TradingBook {
      * <ul>
      * <li>逐仓仓位的未实现盈亏最多亏到它的保证金（和平仓结算一致），不影响可用余额，要平仓实现了才能动用。</li>
      * <li>全仓仓位的未实现盈亏不设下限；全仓浮亏会占用可用余额（可用余额 = 空闲余额 + 全仓浮亏，不低于 0），
-     * 全仓浮盈不算可用（比币安保守：浮盈要平仓实现了才能动用，免得凭空造出还没从流动性池收到的钱）。</li>
+     * 全仓浮盈不算可用（偏保守：浮盈要平仓实现了才能动用，免得凭空造出还没从流动性池收到的钱）。</li>
      * </ul>
      *
      * @param markPrice 某个合约当前的标记价格；返回 NaN（合约已不在配置里）时该仓位按开仓均价算，盈亏为 0
@@ -181,7 +181,7 @@ public final class TradingBook {
     }
 
     /**
-     * 切换保证金模式（币安规则：该合约有仓位或委托时不能切换）。设成和现在一样也算生效。
+     * 切换保证金模式（规则：该合约有仓位或委托时不能切换）。设成和现在一样也算生效。
      */
     public MarginResult setMarginMode(UUID player, String symbol, MarginMode mode) {
         if (hasOpenExposure(player, symbol)) {
@@ -199,10 +199,10 @@ public final class TradingBook {
     }
 
     /**
-     * 调整已有仓位的杠杆（币安规则：有仓位时也可以调，受当前名义价值所在档位的杠杆上限和可用保证金约束）。
+     * 调整已有仓位的杠杆（规则：有仓位时也可以调，受当前名义价值所在档位的杠杆上限和可用保证金约束）。
      * <p>
      * 仓位的保证金按 开仓名义价值 / 新杠杆 重算：调低杠杆要补保证金，从可用余额里扣，不够就拒绝；调高杠杆退回多余的保证金。
-     * 逐仓仓位调高杠杆后，保证金率不能达到 100%（否则一调就被强平）。和币安的差别：币安的逐仓仓位有仓位时不能调低杠杆
+     * 逐仓仓位调高杠杆后，保证金率不能达到 100%（否则一调就被强平）。常见做法是逐仓仓位有仓位时不能调低杠杆
      * （因为不会自动补保证金），这里自动从可用余额补，所以两个方向都允许。
      *
      * @param markPrice 各合约当前的标记价格（当前名义价值与可用余额按它算）

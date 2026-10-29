@@ -13,7 +13,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * 最新成交页（币安样式）：每行三列，价格（买入涨色、卖出跌色）、数量、市场时间，最新的在最上面。
+ * 最新成交页：每行三列，价格（买入涨色、卖出跌色）、数量、市场时间，最新的在最上面。
  * 玩家成交整行加黄色底色和左侧色条，并多占一行标出玩家名（全服可见）；模拟成交只是一行普通文字。
  * <p>
  * 只保留最近 {@link ClientLatestTrades#KEEP} 笔，新成交从顶部进来、旧的往下推；鼠标滚轮可以往回翻。
@@ -45,17 +45,17 @@ final class LatestTradesPage {
 
         int y = top + 2;
         graphics.text(font, Component.translatable("screen.creepercapital.trading.latest.price"), innerLeft, y,
-                BinancePalette.TEXT_SECONDARY, false);
+                TradingPalette.TEXT_SECONDARY, false);
         drawRight(graphics, Component.translatable("screen.creepercapital.trading.latest.quantity"), quantityRight, y,
-                BinancePalette.TEXT_SECONDARY);
+                TradingPalette.TEXT_SECONDARY);
         drawRight(graphics, Component.translatable("screen.creepercapital.trading.latest.time"), timeRight, y,
-                BinancePalette.TEXT_SECONDARY);
+                TradingPalette.TEXT_SECONDARY);
         y += HEADER_HEIGHT;
 
         List<MarketTrade> trades = ClientLatestTrades.newestFirst(symbol);
         if (trades.isEmpty()) {
             graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.latest.empty"), (left + right) / 2,
-                    y + 8, BinancePalette.TEXT_SECONDARY);
+                    y + 8, TradingPalette.TEXT_SECONDARY);
             return;
         }
         // 置顶区：只放得下页面一半高度以内的几笔，下面画一条分隔线
@@ -70,7 +70,7 @@ final class LatestTradesPage {
             y += ROW * 2;
         }
         if (!pinned.isEmpty()) {
-            graphics.horizontalLine(left, right - 1, y, BinancePalette.DIVIDER);
+            graphics.horizontalLine(left, right - 1, y, TradingPalette.DIVIDER);
             y += 2;
         }
         List<MarketTrade> rest = new ArrayList<>(trades.size());
@@ -97,15 +97,15 @@ final class LatestTradesPage {
         int height = trade.isPlayer() ? ROW * 2 : ROW;
         int textY = y + (ROW - font.lineHeight) / 2 + 1;
         if (trade.isPlayer()) {
-            graphics.fill(left, y, right, y + height, BinancePalette.withAlpha(BinancePalette.BRAND_YELLOW, PLAYER_ALPHA));
-            graphics.fill(left, y, left + PLAYER_BAR_WIDTH, y + height, BinancePalette.BRAND_YELLOW);
+            graphics.fill(left, y, right, y + height, TradingPalette.withAlpha(TradingPalette.BRAND_YELLOW, PLAYER_ALPHA));
+            graphics.fill(left, y, left + PLAYER_BAR_WIDTH, y + height, TradingPalette.BRAND_YELLOW);
         }
-        graphics.text(font, MarketFormat.price(trade.price()), innerLeft, textY, BinancePalette.side(trade.buy()), false);
-        drawRight(graphics, Quantities.format(trade.lots(), decimals), quantityRight, textY, BinancePalette.TEXT_PRIMARY);
-        drawRight(graphics, time(trade), timeRight, textY, BinancePalette.TEXT_SECONDARY);
+        graphics.text(font, MarketFormat.price(trade.price()), innerLeft, textY, TradingPalette.side(trade.buy()), false);
+        drawRight(graphics, Quantities.format(trade.lots(), decimals), quantityRight, textY, TradingPalette.TEXT_PRIMARY);
+        drawRight(graphics, time(trade), timeRight, textY, TradingPalette.TEXT_SECONDARY);
         if (trade.isPlayer()) {
             String name = Component.translatable("screen.creepercapital.trading.latest.player", trade.player()).getString();
-            graphics.text(font, GuiText.fit(font, name, right - innerLeft - 4), innerLeft, textY + ROW, BinancePalette.BRAND_YELLOW, false);
+            graphics.text(font, GuiText.fit(font, name, right - innerLeft - 4), innerLeft, textY + ROW, TradingPalette.BRAND_YELLOW, false);
         }
     }
 
