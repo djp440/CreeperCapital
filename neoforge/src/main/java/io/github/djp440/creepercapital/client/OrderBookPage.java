@@ -11,7 +11,8 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * 盘口页（币安样式）：卖盘红字在上、买盘绿字在下，中间是最新价格；每档三列，价格、数量、累计数量，背景有按累计数量画的深度条。
+ * 盘口页（币安样式）：卖盘在上（跌色）、买盘在下（涨色），中间是最新价格（右侧灰字是标记价格）；每档三列，价格、数量、累计数量，
+ * 背景有按累计数量画的深度条。档数随可用高度增减（最多 {@link #MAX_LEVELS} 档）。
  * <p>
  * 盘口就是虚拟流动性曲线（{@link LiquidityCurve}）的前若干档：用同步下来的合约深度参数和当前最新价格在本地算，
  * 与服务端市价成交走的是同一份代码，所以按这里的档位逐档吃单算出的均价就是实际成交均价。
@@ -21,7 +22,7 @@ final class OrderBookPage {
     private static final int ROW = 10;
     private static final int HEADER_HEIGHT = 12;
     private static final int LAST_PRICE_HEIGHT = 16;
-    private static final int MAX_LEVELS = 8;
+    private static final int MAX_LEVELS = 20;
     /** 深度条的透明度（0x00 到 0xFF）。 */
     private static final int BAR_ALPHA = 0x30;
 
@@ -62,21 +63,23 @@ final class OrderBookPage {
         // 卖盘：离最新价格最近的一档（卖一）在最下面，所以从最远的一档往下画
         for (int i = levels - 1; i >= 0; i--) {
             extractLevel(graphics, asks.get(i), (i + 1) * curve.levelLots(), totalLots, decimals, innerLeft, innerRight, quantityRight,
-                    y, BinancePalette.DOWN);
+                    y, BinancePalette.down());
             y += ROW;
         }
 
         // 中间是最新价格，颜色跟随相对上一个行情步的涨跌
-        graphics.horizontalLine(left + 1, right - 2, y, BinancePalette.DIVIDER);
-        graphics.text(font, MarketFormat.price(snapshot.lastPrice()), innerLeft, y + (LAST_PRICE_HEIGHT - font.lineHeight) / 2 + 1,
-                TradingScreen.lastPriceColor(), false);
-        graphics.horizontalLine(left + 1, right - 2, y + LAST_PRICE_HEIGHT, BinancePalette.DIVIDER);
+        graphics.horizontalLine(left, right - 1, y, BinancePalette.DIVIDER);
+        int midY = GuiText.centeredY(font, y, y + LAST_PRICE_HEIGHT);
+        graphics.text(font, MarketFormat.price(snapshot.lastPrice()), innerLeft, midY,
+                BinancePalette.direction(ClientMarket.lastPriceDirection()), false);
+        drawRight(graphics, MarketFormat.price(snapshot.markPrice()), innerRight, midY, BinancePalette.TEXT_SECONDARY);
+        graphics.horizontalLine(left, right - 1, y + LAST_PRICE_HEIGHT, BinancePalette.DIVIDER);
         y += LAST_PRICE_HEIGHT + 1;
 
         // 买盘：买一在最上面
         for (int i = 0; i < levels; i++) {
             extractLevel(graphics, bids.get(i), (i + 1) * curve.levelLots(), totalLots, decimals, innerLeft, innerRight, quantityRight,
-                    y, BinancePalette.UP);
+                    y, BinancePalette.up());
             y += ROW;
         }
     }
@@ -84,7 +87,7 @@ final class OrderBookPage {
     private void extractLevel(GuiGraphicsExtractor graphics, LiquidityCurve.Level level, long cumulativeLots, long totalLots,
             int decimals, int innerLeft, int innerRight, int quantityRight, int y, int color) {
         int barWidth = (int) Math.round((innerRight - innerLeft) * (double) cumulativeLots / totalLots);
-        graphics.fill(innerRight - barWidth, y, innerRight + PAD - 1, y + ROW, (color & 0x00FFFFFF) | (BAR_ALPHA << 24));
+        graphics.fill(innerRight - barWidth, y, innerRight + PAD, y + ROW, BinancePalette.withAlpha(color, BAR_ALPHA));
         int textY = y + (ROW - font.lineHeight) / 2 + 1;
         graphics.text(font, MarketFormat.price(level.price()), innerLeft, textY, color, false);
         drawRight(graphics, Quantities.format(level.lots(), decimals), quantityRight, textY, BinancePalette.TEXT_PRIMARY);
