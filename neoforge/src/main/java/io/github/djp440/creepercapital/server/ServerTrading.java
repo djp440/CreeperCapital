@@ -322,6 +322,10 @@ public final class ServerTrading {
             if (owner != null && notice != null) {
                 ModPayloads.sendTo(owner, notice);
             }
+            if (owner == null) {
+                // 玩家离线时成交 / 触发的委托记进离线汇总（在线的已经收到实时提示；玩家自己操作引起的失效事件不经过这里）
+                ServerOfflineSummary.onOrderEvent(server, event);
+            }
         }
         logEvents(events);
         if (!events.isEmpty()) {
@@ -366,6 +370,7 @@ public final class ServerTrading {
             touched.add(event.player());
             ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
             if (owner == null) {
+                ServerOfflineSummary.onLiquidation(server, event);
                 continue;
             }
             ModPayloads.sendTo(owner, new OrderResultPayload(false, "liquidated",
@@ -403,6 +408,8 @@ public final class ServerTrading {
                 ServerPlayer owner = server.getPlayerList().getPlayer(record.player());
                 if (owner != null) {
                     ModPayloads.sendTo(owner, describe(record));
+                } else {
+                    ServerOfflineSummary.onFunding(server, record);
                 }
             }
         }

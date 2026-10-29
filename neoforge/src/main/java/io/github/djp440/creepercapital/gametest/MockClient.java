@@ -17,7 +17,9 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,9 +35,14 @@ final class MockClient {
 
     /** 让一名装有本模组的模拟玩家进服。 */
     static ServerPlayer join(GameTestHelper helper, String name) {
+        return join(helper, name, UUID.randomUUID());
+    }
+
+    /** 让指定 UUID 的玩家进服（离线汇总的测试里，同一名玩家下线后再上线）。 */
+    static ServerPlayer join(GameTestHelper helper, String name, UUID id) {
         ServerLevel level = helper.getLevel();
         MinecraftServer server = level.getServer();
-        CommonListenerCookie cookie = CommonListenerCookie.createInitial(new GameProfile(UUID.randomUUID(), name), false);
+        CommonListenerCookie cookie = CommonListenerCookie.createInitial(new GameProfile(id, name), false);
         ServerPlayer player = new ServerPlayer(server, level, cookie.gameProfile(), cookie.clientInformation());
         Connection connection = new Connection(PacketFlow.SERVERBOUND);
         new EmbeddedChannel(connection);
@@ -51,6 +58,19 @@ final class MockClient {
 
     static void leave(ServerPlayer player) {
         player.level().getServer().getPlayerList().remove(player);
+    }
+
+    /** 这名玩家迄今收到的聊天栏系统消息（不含动作栏），按收到的先后排列。 */
+    static List<Component> systemMessages(ServerPlayer player) {
+        EmbeddedChannel channel = (EmbeddedChannel) player.connection.getConnection().channel();
+        channel.flushOutbound();
+        List<Component> messages = new ArrayList<>();
+        for (Object message : channel.outboundMessages()) {
+            if (message instanceof ClientboundSystemChatPacket packet && !packet.overlay()) {
+                messages.add(packet.content());
+            }
+        }
+        return messages;
     }
 
     /** 这名玩家迄今收到的某类载荷，按收到的先后排列。 */
