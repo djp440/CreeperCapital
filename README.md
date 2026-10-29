@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-> Trade perpetual futures on vanilla Minecraft resources — inside Minecraft, on a Binance-style exchange.
+> Trade perpetual futures on vanilla Minecraft resources — on a full-featured exchange inside the game.
 
 ![Trading screen](docs/images/overview.png)
 
@@ -15,7 +15,7 @@ Creeper Capital is a NeoForge mod that adds a shared, server-wide futures exchan
 ## Features
 
 - **Two perpetual contracts:** `DIAMONDCRP` (up to 125x) and `GUNPOWDERCRP` (up to 50x), each with its own volatility profile (GARCH, fat tails, Poisson jumps, bull/bear/ranging regimes). Contracts are configurable in a server config file.
-- **Binance-style trading screen** (default key **K**): candlestick chart with MA and volume, order book, latest trades, order panel, position / order / trade / funding tables, and a green-up/red-up color switch.
+- **Full trading screen** (default key **K**): candlestick chart with MA and volume, order book, latest trades, order panel, position / order / trade / funding tables, and a green-up/red-up color switch.
 - **Order types:** market, limit, take-profit / stop-loss, reduce-only.
 - **Margin:** isolated and cross margin, tiered leverage and maintenance rates.
 - **Risk engine:** funding rate settlement every 8 market hours, liquidation, a risk insurance fund, and auto-deleveraging (ADL) with a position cap per contract.
@@ -80,6 +80,8 @@ The project has two Gradle modules that ship as one jar: `core/` (pure Java 17 d
 ## Contributing
 
 Issues and ideas are welcome on the [issue tracker](https://github.com/djp440/CreeperCapital/issues).
+
+**Developing with AI agents:** we recommend using [mattpocock/skills](https://github.com/mattpocock/skills) to contribute. The repo is set up for it — issues and specs live in GitHub Issues, with domain language in [`GLOSSARY.md`](GLOSSARY.md) and decisions in [`docs/adr/`](docs/adr/); see "Agent skills" in [`AGENTS.md`](AGENTS.md).
 
 ## License
 

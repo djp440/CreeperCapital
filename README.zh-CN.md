@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-> 在 Minecraft 里，用一个仿币安的交易所交易以原版资源为标的的永续合约。
+> 在 Minecraft 里，在游戏内的一个功能完整的交易所里，交易以原版资源为标的的永续合约。
 
 ![交易界面](docs/images/overview.png)
 
@@ -13,7 +13,7 @@
 ## 功能
 
 - **两个永续合约：** `DIAMONDCRP`（最高 125 倍）与 `GUNPOWDERCRP`（最高 50 倍），各有独立的波动率倾向（GARCH、肥尾分布、泊松跳跃、牛/熊/震荡三种市场状态）。合约可在服务端配置文件里定义。
-- **仿币安交易界面**（默认按键 **K**）：K 线图（含 MA 与成交量）、盘口、最新成交、下单面板、仓位 / 委托 / 成交 / 资金费表格，并可切换「绿涨红跌 / 红涨绿跌」。
+- **完整的交易界面**（默认按键 **K**）：K 线图（含 MA 与成交量）、盘口、最新成交、下单面板、仓位 / 委托 / 成交 / 资金费表格，并可切换「绿涨红跌 / 红涨绿跌」。
 - **委托类型：** 市价、限价、止盈止损、只减仓。
 - **保证金：** 逐仓与全仓，杠杆与维持保证金率分档。
 - **风控：** 每 8 个市场小时结算资金费、强平、风险保障基金，以及带持仓总量上限的自动减仓（ADL）。
@@ -78,6 +78,8 @@ OP 命令（均在 `/creeper dev` 下）：`deposit` / `withdraw`（合约账户
 ## 参与
 
 欢迎在 [issue](https://github.com/djp440/CreeperCapital/issues) 里提想法和问题。
+
+**与 AI 代理协作开发：** 建议使用 [mattpocock/skills](https://github.com/mattpocock/skills) 参与开发。仓库已按它配置好——issue 与规格放在 GitHub Issues，领域术语见 [`GLOSSARY.md`](GLOSSARY.md)，决策见 [`docs/adr/`](docs/adr/)；详见 [`AGENTS.md`](AGENTS.md) 的「Agent skills」一节。
 
 ## 许可证
 
