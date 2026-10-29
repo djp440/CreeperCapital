@@ -22,6 +22,7 @@ import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.MarginResult;
@@ -303,7 +304,7 @@ public final class ServerTrading {
      * 每个行情步：先用新价格触发穿越了委托价的挂单（离线玩家的同样触发，成交 / 撤销留在存档和历史委托里），
      * 在线的玩家收到提示和最新的交易状态；然后持有仓位的在线玩家的未实现盈亏随标记价格变，把最新资产发给他们。
      */
-    static void onMarketStep(MinecraftServer server, List<MarketSnapshot> snapshots) {
+    public static void onMarketStep(MinecraftServer server, List<MarketSnapshot> snapshots) {
         if (book == null) {
             return;
         }
@@ -326,7 +327,8 @@ public final class ServerTrading {
         if (!events.isEmpty()) {
             markDirty();
         }
-        // 同一行情步内的顺序约定：① 委托触发（上面）→ ② 资金费结算（#13，接在这里）→ ③ 强平检查
+        // 同一个行情步内的顺序：① 委托触发（上面）→ ② 资金费结算 → ③ 强平检查。后加的阶段按这个顺序接在后面
+        touched.addAll(settleFunding(server, snapshots));
         liquidationStage(server, snapshots, touched);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (touched.contains(player.getUUID())) {
@@ -381,7 +383,48 @@ public final class ServerTrading {
         return events;
     }
 
-    /** 把这名玩家的交易状态（各合约的下单参数、全部仓位、最近的成交、委托）发给他。 */
+    /**
+     * 行情步的第二阶段：资金费结算。快照恰在结算点（倒计时 00:00:00）的合约，其仓位按结算时的费率与标记价格和流动性池收付
+     * （规则见 {@link TradingBook#settleFunding}）。离线玩家同样结算，记录留在存档里；在线玩家实时收到提示，随后的状态同步带上新记录。
+     * 市场暂停和停服期间没有行情步，也就没有结算，重启后按市场时间继续倒数，不补结算。
+     * <p>
+     * 逐仓保证金被扣到 0 的仓位留着不动，由随后的强平检查接手。
+     *
+     * @return 这一步结算过的玩家（需要重发交易状态和资产）
+     */
+    public static Set<UUID> settleFunding(MinecraftServer server, List<MarketSnapshot> snapshots) {
+        Set<UUID> touched = new LinkedHashSet<>();
+        for (MarketSnapshot snapshot : snapshots) {
+            for (FundingRecord record : book().settleFunding(snapshot)) {
+                LOGGER.info("资金费 #{} {} {} {} 费率 {} 标记价格 {} 名义价值 {} 金额 {} 未收付 {} 市场秒 {}", record.id(),
+                        record.player(), record.side(), record.symbol(), record.rate(), record.markPrice(),
+                        record.notional(), record.amount(), record.shortfall(), record.marketSeconds());
+                touched.add(record.player());
+                ServerPlayer owner = server.getPlayerList().getPlayer(record.player());
+                if (owner != null) {
+                    ModPayloads.sendTo(owner, describe(record));
+                }
+            }
+        }
+        if (!touched.isEmpty()) {
+            markDirty();
+        }
+        return touched;
+    }
+
+    /** 资金费结算对应的玩家提示。 */
+    private static OrderResultPayload describe(FundingRecord record) {
+        Money moved = record.paid() ? Money.ZERO.minus(record.amount()) : record.amount();
+        String rate = String.format(Locale.ROOT, "%.4f%%", record.rate() * 100);
+        if (record.shortfall().isPositive()) {
+            return new OrderResultPayload(false, "funding_partial", List.of(record.symbol(),
+                    (record.paid() ? "-" : "+") + moved.toDisplayString(), record.shortfall().toDisplayString(), rate));
+        }
+        return new OrderResultPayload(true, record.paid() ? "funding_paid" : "funding_received",
+                List.of(record.symbol(), moved.toDisplayString(), rate));
+    }
+
+    /** 把这名玩家的交易状态（各合约的下单参数、全部仓位、最近的成交、委托、资金费记录）发给他。 */
     public static void sendState(ServerPlayer player) {
         List<PlayerTrade> trades = book().trades(player.getUUID());
         List<PlayerTrade> recent = trades.subList(Math.max(0, trades.size() - SYNCED_TRADES), trades.size());
@@ -391,8 +434,10 @@ public final class ServerTrading {
         orders.sort(Comparator.comparingLong(Order::id));
         List<String> cross = ServerMarket.symbols().stream()
                 .filter(symbol -> book().marginMode(player.getUUID(), symbol) == MarginMode.CROSS).toList();
+        List<FundingRecord> funding = book().fundingRecords(player.getUUID());
+        List<FundingRecord> recentFunding = funding.subList(Math.max(0, funding.size() - SYNCED_TRADES), funding.size());
         ModPayloads.sendTo(player,
-                new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, orders, cross));
+                new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, orders, cross, recentFunding));
     }
 
     private static void markDirty() {

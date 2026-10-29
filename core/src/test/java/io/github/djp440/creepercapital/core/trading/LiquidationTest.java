@@ -499,6 +499,30 @@ class LiquidationTest {
     }
 
     @Test
+    @DisplayName("资金费把逐仓保证金扣到 0 之后，同一步的强平检查接手（先资金费、后强平）")
+    void fundingDrainedPositionIsLiquidatedByTheSameStepsCheck() {
+        isolatedLong();
+        Money before = totalOf(ALICE);
+
+        // 结算点、费率 500%：应付 2000 × 5 = 10000，远超保证金 200.05，保证金扣到 0
+        book.settleFunding(new MarketSnapshot(4800L * 1_000_000, "DIAMONDCRP", 1000, 1000, 1000, 5.0, 0));
+        assertEquals(Money.ZERO, book.position(ALICE, "DIAMONDCRP").orElseThrow().margin());
+        assertEquals(Money.parse("1000201.05025"), pool.balance(), "池子收到开仓费 1.00025 和被扣光的保证金 200.05");
+
+        // 标记价格 1000：盈亏 (1000 − 1000.25) × 2 = −0.5，保证金余额 −0.5 ≥ 维持保证金，强平；没有抵押可没收，亏损 0.5 是穿仓
+        List<LiquidationEvent> events = check(1000, 100);
+
+        assertEquals(1, events.size());
+        assertEquals(Money.ZERO, events.get(0).collateralLost());
+        assertEquals(Money.ZERO, events.get(0).toFund());
+        assertEquals(Money.parse("0.5"), events.get(0).shortfall());
+        assertEquals(Money.parse("0.5"), events.get(0).poolBorne(), "基金是空的，池子少收");
+        assertTrue(book.position(ALICE, "DIAMONDCRP").isEmpty());
+        assertEquals(Money.parse("798.94975"), accounts.balance(ALICE), "可用余额不动");
+        assertEquals(before, totalOf(ALICE), "总额守恒");
+    }
+
+    @Test
     @DisplayName("新账本的风险保障基金是 0")
     void fundStartsEmpty() {
         assertEquals(Money.ZERO, book.fund().balance());

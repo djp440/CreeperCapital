@@ -172,8 +172,9 @@ final class LimitOrderGameTests {
                 Order filled = ServerTrading.book().orders().history(id).get(0);
                 helper.assertValueEqual(filled.status(), OrderStatus.FILLED, "历史委托里是已成交");
             }
-            OrderResultPayload notice = TradingGameTests.last(MockClient.received(online, OrderResultPayload.class));
-            helper.assertValueEqual(notice.code(), "limit_filled", "在线玩家收到成交提示");
+            // 刚开服的第一个行情步恰是资金费结算点，在线玩家的仓位可能同时收到资金费提示，所以不假设成交提示是最后一条
+            helper.assertTrue(MockClient.received(online, OrderResultPayload.class).stream()
+                    .anyMatch(notice -> notice.code().equals("limit_filled")), "在线玩家收到成交提示");
             TradingStatePayload state = TradingGameTests.last(MockClient.received(online, TradingStatePayload.class));
             helper.assertValueEqual(state.positions().size(), 1, "同步了新仓位");
             // 收尾：平掉仓位、取走余额，让共用账本恢复原样

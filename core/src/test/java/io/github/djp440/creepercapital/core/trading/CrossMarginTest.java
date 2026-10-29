@@ -399,7 +399,9 @@ class CrossMarginTest {
         int adjustments = 0;
         int liquidations = 0;
         int crossLiquidations = 0;
+        int settled = 0;
         int shortfalls = 0;
+        int liquidationShortfalls = 0;
 
         for (int i = 0; i < 3000; i++) {
             UUID player = players[random.nextInt(players.length)];
@@ -432,13 +434,28 @@ class CrossMarginTest {
                 book.setMarginMode(player, spec.symbol(),
                         random.nextBoolean() ? MarginMode.CROSS : MarginMode.ISOLATED);
             }
-            // 每一步的价格都在 0.6 到 1.4 倍之间乱跳，高杠杆仓位会被强平，跳得深的会穿仓
+            if (i % 20 == 19) {
+                // 资金费结算：多数是正常费率，偶尔极端费率把逐仓保证金 / 全仓余额扣到 0 或让池子付不起
+                double rate = i % 100 == 99 ? (random.nextBoolean() ? 3.0 : -3.0) : (random.nextDouble() - 0.5) * 0.006;
+                long settleStep = 4800L * (i + 1);
+                for (ContractSpec each : specs) {
+                    double price = each == DEEP_DIAMOND ? diamondPrice : gunpowderPrice;
+                    for (FundingRecord record : book.settleFunding(
+                            new MarketSnapshot(settleStep, each.symbol(), price, price, price, rate, 0))) {
+                        settled++;
+                        if (record.shortfall().isPositive()) {
+                            shortfalls++;
+                        }
+                    }
+                }
+            }
+            // 同一步内顺序：资金费结算 → 强平检查。每一步的价格都在 0.6 到 1.4 倍之间乱跳，高杠杆仓位会被强平，跳得深的会穿仓
             if (random.nextInt(8) == 0) {
                 for (LiquidationEvent event : book.checkLiquidations(mark, symbol -> symbol.equals("DIAMONDCRP")
                         ? DEEP_DIAMOND.marginTiers() : DEEP_GUNPOWDER.marginTiers(), i * 6L)) {
                     liquidations++;
                     crossLiquidations += event.mode() == MarginMode.CROSS ? 1 : 0;
-                    shortfalls += event.shortfall().isPositive() ? 1 : 0;
+                    liquidationShortfalls += event.shortfall().isPositive() ? 1 : 0;
                 }
                 // 账被清空的玩家补钱（开发命令式调账，总额同步调整），让后面的操作还有钱可用
                 for (UUID p : players) {
@@ -457,7 +474,9 @@ class CrossMarginTest {
         assertTrue(adjustments > 50, "应有足够多的杠杆调整：" + adjustments);
         assertTrue(liquidations > 20, "应有足够多的强平：" + liquidations);
         assertTrue(crossLiquidations > 3, "应有全仓强平：" + crossLiquidations);
-        assertTrue(shortfalls > 3, "应有穿仓：" + shortfalls);
+        assertTrue(liquidationShortfalls > 3, "应有穿仓：" + liquidationShortfalls);
+        assertTrue(settled > 100, "应有足够多的资金费结算：" + settled);
+        assertTrue(shortfalls > 0, "极端费率应触发过扣到 0 的情形：" + shortfalls);
     }
 
     private Money total(UUID[] players) {

@@ -8,6 +8,7 @@ import java.util.Map;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTime;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMath;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
@@ -30,12 +31,14 @@ import net.minecraft.network.chat.Component;
  * 每行末尾有「市价平仓」按钮；
  * 成交历史页列出最近的玩家成交（最新的在前），含手续费和已实现盈亏。
  * 当前委托页列出挂着的限价委托，每行末尾有「撤单」按钮；历史委托页列出已成交和已撤销的委托（最新的在前）。
+ * 资金费记录页列出每一次资金费结算（最新的在前），金额按收付着色。
  */
 final class TradeTables {
     static final int ROW_HEIGHT = 12;
     static final int HEADER_HEIGHT = 12;
     private static final int[] POSITION_WEIGHTS = {24, 8, 10, 10, 10, 8, 13, 21, 9};
     private static final int[] TRADE_WEIGHTS = {19, 14, 9, 13, 11, 12, 16};
+    private static final int[] FUNDING_WEIGHTS = {16, 14, 8, 12, 12, 15, 14, 9};
     private static final int[] OPEN_ORDER_WEIGHTS = {14, 13, 8, 13, 13, 11, 12, 8};
     private static final int[] ORDER_HISTORY_WEIGHTS = {15, 13, 8, 12, 10, 10, 9, 9, 13};
     private static final int BUTTON_BACKGROUND = 0xFF2B3139;
@@ -133,6 +136,36 @@ final class TradeTables {
             cell(graphics, columns[4], y, Quantities.format(trade.lots(), decimals), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[5], y, trade.fee().toDisplayString(), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[6], y, trade.kind() == TradeKind.OPEN ? "--" : signedMoney(trade.realizedPnl()), pnlColor);
+        }
+    }
+
+    /** 资金费记录页：每一次结算一行（最新在前）；金额站在玩家一侧，收到涨色、支付跌色。 */
+    void extractFunding(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom) {
+        int[] columns = columns(left, right, FUNDING_WEIGHTS);
+        header(graphics, top, columns, "time", "symbol", "side", "funding_rate", "mark_price", "notional",
+                "funding_amount", "funding_short");
+        List<FundingRecord> records = ClientTrading.fundingNewestFirst();
+        if (records.isEmpty()) {
+            empty(graphics, left, right, top + HEADER_HEIGHT, bottom, "screen.creepercapital.trading.funding.empty");
+            return;
+        }
+        int rows = Math.max(1, (bottom - top - HEADER_HEIGHT) / ROW_HEIGHT);
+        for (int i = 0; i < Math.min(rows, records.size()); i++) {
+            FundingRecord record = records.get(i);
+            int y = top + HEADER_HEIGHT + i * ROW_HEIGHT;
+            int sideColor = record.side() == Side.LONG ? BinancePalette.UP : BinancePalette.DOWN;
+            int amountColor = record.amount().units() > 0 ? BinancePalette.UP
+                    : record.amount().units() < 0 ? BinancePalette.DOWN : BinancePalette.TEXT_PRIMARY;
+            cell(graphics, columns[0], y, MarketFormat.marketTime(new MarketTime(record.marketSeconds())), BinancePalette.TEXT_SECONDARY);
+            cell(graphics, columns[1], y, record.symbol(), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[2], y, Component.translatable("screen.creepercapital.trading.side."
+                    + record.side().name().toLowerCase(Locale.ROOT)).getString(), sideColor);
+            cell(graphics, columns[3], y, MarketFormat.fundingRate(record.rate()), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[4], y, MarketFormat.price(record.markPrice()), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[5], y, record.notional().toDisplayString(), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[6], y, signedMoney(record.amount()), amountColor);
+            cell(graphics, columns[7], y, record.shortfall().isPositive() ? record.shortfall().toDisplayString() : "--",
+                    record.shortfall().isPositive() ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_SECONDARY);
         }
     }
 
