@@ -173,6 +173,36 @@ class MarketTest {
     }
 
     @Test
+    @DisplayName("暂停状态随保存的状态一起恢复：暂停时保存，恢复后仍然冻结，resume 后接着走")
+    void pausedStateSurvivesSaveAndRestore() {
+        Market market = new Market(42L);
+        for (int i = 0; i < 5; i++) {
+            stepOnce(market);
+        }
+        market.pause();
+        MarketSnapshot frozen = market.snapshot();
+
+        Market restored = Market.restore(market.state());
+
+        assertTrue(restored.isPaused());
+        for (int tick = 0; tick < 100; tick++) {
+            assertTrue(restored.tick().isEmpty(), "恢复后仍应处于暂停");
+        }
+        assertEquals(frozen, restored.snapshot());
+        restored.resume();
+        assertEquals(6L, stepOnce(restored).step());
+    }
+
+    @Test
+    @DisplayName("未暂停的市场保存、恢复后仍在运行")
+    void runningMarketStaysRunningAfterRestore() {
+        Market restored = Market.restore(new Market(42L).state());
+
+        assertFalse(restored.isPaused());
+        assertEquals(1L, stepOnce(restored).step());
+    }
+
+    @Test
     @DisplayName("种子和步数相同时，价格序列可以复现")
     void sameSeedAndStepsGiveSamePriceSequence() {
         assertEquals(indexPricePath(new Market(2026L), 500), indexPricePath(new Market(2026L), 500));

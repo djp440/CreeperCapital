@@ -30,6 +30,7 @@ public final class Market {
         this.indexPrice = new RandomWalkIndexPrice(state.indexPrice(), new MarketRandom(state.randomState()));
         this.ticksIntoStep = state.ticksIntoStep();
         this.step = state.step();
+        this.paused = state.paused();
     }
 
     /** 从保存的状态恢复市场，接着停下的地方走，不补算停机期间的行情。 */
@@ -37,9 +38,9 @@ public final class Market {
         return new Market(state);
     }
 
-    /** 需要持久化的全部状态。暂停是运行期开关，不在其中。 */
+    /** 需要持久化的全部状态，包括是否暂停。 */
     public MarketState state() {
-        return new MarketState(step, ticksIntoStep, indexPrice.current(), indexPrice.randomState());
+        return new MarketState(step, ticksIntoStep, indexPrice.current(), indexPrice.randomState(), paused);
     }
 
     /**

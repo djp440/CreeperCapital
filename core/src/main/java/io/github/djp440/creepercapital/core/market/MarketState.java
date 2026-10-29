@@ -7,6 +7,7 @@ package io.github.djp440.creepercapital.core.market;
  * @param ticksIntoStep 当前行情步内已累计的服务器 tick 数
  * @param indexPrice    指数价格（CRP）
  * @param randomState   行情随机数发生器的状态
+ * @param paused        市场是否被 OP 暂停；重启后保持暂停，直到 OP 恢复
  */
-public record MarketState(long step, int ticksIntoStep, double indexPrice, long randomState) {
+public record MarketState(long step, int ticksIntoStep, double indexPrice, long randomState, boolean paused) {
 }

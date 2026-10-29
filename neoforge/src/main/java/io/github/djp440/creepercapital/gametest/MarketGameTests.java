@@ -136,6 +136,7 @@ public final class MarketGameTests {
         for (int tick = 0; tick < Market.TICKS_PER_STEP * 500 + 7; tick++) {
             market.tick();
         }
+        market.pause();
         MarketSnapshot saved = market.snapshot();
         Path dataFolder = Files.createTempDirectory("creepercapital-market");
         try {
@@ -151,6 +152,9 @@ public final class MarketGameTests {
             Market restored = reloaded.market();
             helper.assertValueEqual(restored.snapshot(), saved, "重新加载后的市场快照");
             helper.assertValueEqual(restored.snapshot().time(), saved.time(), "重新加载后的市场时间");
+            helper.assertTrue(restored.isPaused(), "暂停状态应随存档保存");
+            restored.resume();
+            market.resume();
 
             // 存档时已经攒了 7 个 tick：再过 13 个 tick 恰好是下一个行情步，且与没停过的市场一模一样
             MarketSnapshot expectedNext = null;

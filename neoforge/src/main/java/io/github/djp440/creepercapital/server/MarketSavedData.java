@@ -19,7 +19,8 @@ public final class MarketSavedData extends SavedData {
             Codec.LONG.fieldOf("step").forGetter(MarketState::step),
             Codec.INT.fieldOf("ticks_into_step").forGetter(MarketState::ticksIntoStep),
             Codec.DOUBLE.fieldOf("index_price").forGetter(MarketState::indexPrice),
-            Codec.LONG.fieldOf("random_state").forGetter(MarketState::randomState))
+            Codec.LONG.fieldOf("random_state").forGetter(MarketState::randomState),
+            Codec.BOOL.optionalFieldOf("paused", false).forGetter(MarketState::paused))
             .apply(i, MarketState::new));
 
     public static final Codec<MarketSavedData> CODEC = STATE_CODEC.xmap(

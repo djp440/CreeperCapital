@@ -16,6 +16,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
@@ -34,6 +35,7 @@ public final class ServerMarket {
 
     public static void register() {
         NeoForge.EVENT_BUS.addListener(ServerMarket::onServerStarting);
+        NeoForge.EVENT_BUS.addListener(ServerMarket::onServerStopping);
         NeoForge.EVENT_BUS.addListener(ServerMarket::onServerStopped);
         NeoForge.EVENT_BUS.addListener(ServerMarket::onServerTick);
         NeoForge.EVENT_BUS.addListener(ServerMarket::onPlayerLoggedIn);
@@ -47,10 +49,19 @@ public final class ServerMarket {
     /** 暂停市场：价格和市场时间一起冻结（{@code /creeper dev market pause}）。 */
     public static void pause() {
         market().pause();
+        markDirty();
     }
 
     public static void resume() {
         market().resume();
+        markDirty();
+    }
+
+    /** 暂停状态要存档，而暂停时每 tick 不再标脏，所以切换时主动标脏一次。 */
+    private static void markDirty() {
+        if (data != null) {
+            data.setDirty();
+        }
     }
 
     public static boolean isPaused() {
@@ -75,9 +86,16 @@ public final class ServerMarket {
             LOGGER.info("新建市场：{}", saved.market().snapshot());
         } else {
             MarketSnapshot snapshot = saved.market().snapshot();
-            LOGGER.info("从存档恢复市场：{}，市场时间 {}", snapshot, snapshot.time());
+            LOGGER.info("从存档恢复市场：{}，市场时间 {}，暂停={}", snapshot, snapshot.time(), saved.market().isPaused());
         }
         data = saved;
+    }
+
+    private static void onServerStopping(ServerStoppingEvent event) {
+        if (data != null) {
+            MarketSnapshot snapshot = data.market().snapshot();
+            LOGGER.info("停服时的市场：{}，市场时间 {}，暂停={}", snapshot, snapshot.time(), data.market().isPaused());
+        }
     }
 
     private static void onServerStopped(ServerStoppedEvent event) {
