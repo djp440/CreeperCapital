@@ -29,6 +29,22 @@ dependencies {
     devImplementation coreMain.output
 }
 
+// 语言文件完整性检查（src/test，纯文件读取，不加载 Minecraft）：随 check 一起跑
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    defaultCharacterEncoding = 'UTF-8'
+}
+
 // 开发环境调试日志目录：仓库根目录的 logs/
 def devLogDir = rootProject.file('logs').absolutePath
 
