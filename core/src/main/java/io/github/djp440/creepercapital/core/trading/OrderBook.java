@@ -118,7 +118,7 @@ public final class OrderBook {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
         long now = snapshot.time().totalSeconds();
-        if (crosses(spec, snapshot, side, price)) {
+        if (crosses(spec, snapshot, side, lots, price)) {
             TradeResult result = book.open(player, spec, snapshot, side, lots, leverage);
             if (result instanceof TradeResult.Filled filled) {
                 PlayerTrade trade = filled.trade();
@@ -172,16 +172,23 @@ public final class OrderBook {
     public List<OrderEvent> onSnapshot(ContractSpec spec, MarketSnapshot snapshot) {
         List<OrderEvent> events = new ArrayList<>();
         for (Order order : List.copyOf(open.values())) {
-            if (order.symbol().equals(spec.symbol()) && crosses(spec, snapshot, order.side(), order.price())) {
+            if (order.symbol().equals(spec.symbol()) && crosses(spec, snapshot, order.side(), order.lots(), order.price())) {
                 events.add(fill(order, spec, snapshot.time().totalSeconds()));
             }
         }
         return events;
     }
 
-    /** 此刻是否穿越：买单可成交买价不高于委托价，卖单可成交卖价不低于委托价。 */
-    private static boolean crosses(ContractSpec spec, MarketSnapshot snapshot, Side side, double price) {
-        double quote = TradingBook.fillPrice(spec, snapshot, side);
+    /**
+     * 此刻是否穿越：这么多手按市价吃单的均价（买入含半个点差和滑点，唯一成交价入口）不比委托价差，
+     * 即买单均价不高于委托价、卖单均价不低于委托价。用数量算而不是只看第一档，保证“下单即成交”的 taker 成交价
+     * 永远不会比委托价差；代价是大单要等价格更深地越过委托价才会触发。
+     */
+    private static boolean crosses(ContractSpec spec, MarketSnapshot snapshot, Side side, long lots, double price) {
+        double quote = TradingBook.fillPrice(spec, snapshot, side, lots);
+        if (!(quote > 0)) {
+            return false;
+        }
         return side == Side.LONG ? quote <= price : quote >= price;
     }
 

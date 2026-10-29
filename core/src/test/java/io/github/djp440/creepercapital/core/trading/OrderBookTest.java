@@ -25,8 +25,10 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
  * 挂单冻结保证金和按 maker 费率预估的手续费。钻石：点差 0.5、数量精度 3 位。期望值都是手算的。
  */
 class OrderBookTest {
-    private static final ContractSpec DIAMOND = ContractSpec.defaults().get(0);
-    private static final ContractSpec GUNPOWDER = ContractSpec.defaults().get(1);
+    private static final ContractSpec DEEP_DIAMOND = ContractSpec.defaults().get(0);
+    // 手算期望值用无限深的合约（成交价就是最新价 ± 半个点差）；滑点见 slippage 一节
+    private static final ContractSpec DIAMOND = unlimitedDepth(DEEP_DIAMOND);
+    private static final ContractSpec GUNPOWDER = unlimitedDepth(ContractSpec.defaults().get(1));
     private static final UUID ALICE = new UUID(0, 1);
     private static final UUID BOB = new UUID(0, 2);
 
@@ -41,6 +43,11 @@ class OrderBookTest {
         pool = new LiquidityPool();
         book = new TradingBook(accounts, pool);
         orders = book.orders();
+    }
+
+    private static ContractSpec unlimitedDepth(ContractSpec spec) {
+        return new ContractSpec(spec.symbol(), spec.underlying(), spec.initialPrice(), spec.baseVolume(), spec.volatility(),
+                spec.spread(), spec.maxLeverage(), spec.quantityDecimals(), 0.0);
     }
 
     private static MarketSnapshot snapshot(ContractSpec spec, double last, long step) {
@@ -194,6 +201,24 @@ class OrderBookTest {
         assertEquals(1001, done.price());
         assertEquals(1000.25, done.fillPrice());
         assertEquals(Money.parse("1.00025"), done.fee());
+    }
+
+    @Test
+    @DisplayName("滑点：按数量吃单的均价高于委托价就不算穿越，挂着；委托价够高才按曲线均价成交（taker）")
+    void slippageDecidesWhetherOrderCrosses() {
+        deposit("1000");
+        MarketSnapshot at = snapshot(DEEP_DIAMOND, 1000);
+        // 卖一 1000.25；2.000 个 = 4 档（每档 500 手），相邻档差约 0.0526，均价约 1000.33
+        double average = TradingBook.fillPrice(DEEP_DIAMOND, at, Side.LONG, TradeKind.OPEN, 2000);
+        assertTrue(average > 1000.30 && average < 1000.40, "均价应约 1000.33：" + average);
+
+        // 委托价 1000.30 高于卖一但低于均价：吃不下这么多，挂着不成交
+        TradeResult resting = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.30);
+        assertInstanceOf(TradeResult.Placed.class, resting);
+
+        // 委托价 1000.5 覆盖均价：按曲线均价成交，和同数量市价单同一个成交价
+        TradeResult taken = orders.placeLimit(ALICE, DEEP_DIAMOND, at, Side.LONG, 2000, 10, 1000.5);
+        assertEquals(average, assertInstanceOf(TradeResult.Filled.class, taken).trade().price());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.djp440.creepercapital.gametest;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BiConsumer;
@@ -10,6 +11,7 @@ import com.mojang.serialization.DataResult;
 
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
@@ -50,8 +52,22 @@ final class LimitOrderGameTests {
         function.accept("trading_saved_data_without_orders_still_loads", LimitOrderGameTests::tradingSavedDataWithoutOrdersStillLoads);
     }
 
+    /** 活市场的合约参数是配置文件决定的（数量精度、杠杆上限都可能不是内置值），手数和杠杆按它现算。 */
+    private static ContractSpec spec() {
+        return ServerMarket.spec(DIAMOND);
+    }
+
+    /** 1 个标的物对应的手数。 */
+    private static long lots() {
+        return BigDecimal.TEN.pow(spec().quantityDecimals()).longValueExact();
+    }
+
+    private static int leverage() {
+        return Math.min(10, spec().maxLeverage());
+    }
+
     private static OrderPayload buyLimit(double price) {
-        return new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000, 10, OrderPayload.Execution.LIMIT, price);
+        return new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, lots(), leverage(), OrderPayload.Execution.LIMIT, price);
     }
 
     /** 比最新价低得多的整数价格，保证挂单不会立即成交。 */
@@ -59,10 +75,12 @@ final class LimitOrderGameTests {
         return Math.floor(ServerMarket.snapshot(DIAMOND).lastPrice() * 0.5);
     }
 
-    /** 1.000 个、10 倍杠杆、整数委托价 p 时冻结的资金：保证金 p / 10 加 maker 手续费 0.02% × p。 */
+    /** 1 个标的物、整数委托价 p 时冻结的资金（名义价值正好是 p）：保证金 p / 杠杆（向上取整到 6 位）加 maker 手续费 0.02% × p。 */
     private static Money frozenFor(double price) {
         BigDecimal p = BigDecimal.valueOf(price);
-        return Money.parse(p.divide(BigDecimal.TEN).add(p.multiply(new BigDecimal("0.0002"))).toPlainString());
+        BigDecimal margin = p.divide(BigDecimal.valueOf(leverage()), 6, RoundingMode.CEILING);
+        BigDecimal fee = p.multiply(new BigDecimal("0.0002")).setScale(6, RoundingMode.HALF_UP);
+        return Money.parse(margin.add(fee).toPlainString());
     }
 
     private static Order orderById(List<Order> orders, long id) {
@@ -94,7 +112,7 @@ final class LimitOrderGameTests {
             TradingStatePayload state = TradingGameTests.last(MockClient.received(player, TradingStatePayload.class));
             helper.assertValueEqual(orderById(state.orders(), order.id()).status(), OrderStatus.OPEN, "同步给玩家的当前委托");
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, 1000, 0,
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, lots(), 0,
                     OrderPayload.Execution.LIMIT, price));
             helper.assertValueEqual(TradingGameTests.last(MockClient.received(player, OrderResultPayload.class)).code(),
                     "limit_close_unsupported", "限价平仓留给 #15");
@@ -130,13 +148,13 @@ final class LimitOrderGameTests {
         ServerPlayer offline = TradingGameTests.trader(helper, "LimitTrader3", "1000");
         UUID onlineId = online.getUUID();
         UUID offlineId = offline.getUUID();
-        double price = Math.floor(ServerMarket.snapshot(DIAMOND).lastPrice() * 0.95);
+        double price = Math.floor(ServerMarket.snapshot(DIAMOND).lastPrice() * 0.99);
         ServerTrading.handleOrder(online, buyLimit(price));
         ServerTrading.handleOrder(offline, buyLimit(price));
         helper.assertValueEqual(ServerTrading.book().orders().open(onlineId).size(), 1, "在线玩家挂单");
         helper.assertValueEqual(ServerTrading.book().orders().open(offlineId).size(), 1, "待离线玩家挂单");
         MockClient.leave(offline);
-        // 价格 −10%，下一个行情步跳空穿过 −5% 处的委托价
+        // 请求 −10%：实际跳幅由行情模型限定（可能只有几个百分点），但一定远大于 −1%，下一个行情步跳空穿过委托价
         ServerMarket.queueJump(DIAMOND, -0.1);
         BigDecimal makerFee = BigDecimal.valueOf(price).multiply(new BigDecimal("0.0002"));
 

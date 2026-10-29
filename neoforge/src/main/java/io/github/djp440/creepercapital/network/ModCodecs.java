@@ -106,6 +106,7 @@ final class ModCodecs {
             ByteBufCodecs.DOUBLE, TradingParams::spread,
             ByteBufCodecs.VAR_INT, TradingParams::maxLeverage,
             ByteBufCodecs.VAR_INT, TradingParams::quantityDecimals,
+            ByteBufCodecs.DOUBLE, TradingParams::depthSlippage,
             TradingParams::new);
 
     static final StreamCodec<ByteBuf, Stats24h> STATS_24H = StreamCodec.composite(
