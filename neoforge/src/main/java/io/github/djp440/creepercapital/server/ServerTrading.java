@@ -350,8 +350,8 @@ public final class ServerTrading {
      * 强平检查并通知。{@code players} 限定检查哪些玩家的仓位：生产代码检查所有人；GameTest 共用一个活账本，
      * 用它把人为注入的极端价格限制在测试自己的玩家身上。
      */
-    public static void liquidate(MinecraftServer server, long marketSeconds, ToDoubleFunction<String> markPrice,
-            Predicate<UUID> players, Set<UUID> touched) {
+    public static List<LiquidationEvent> liquidate(MinecraftServer server, long marketSeconds,
+            ToDoubleFunction<String> markPrice, Predicate<UUID> players, Set<UUID> touched) {
         List<LiquidationEvent> events = book().checkLiquidations(players, markPrice,
                 symbol -> ServerMarket.spec(symbol).marginTiers(), marketSeconds);
         for (LiquidationEvent event : events) {
@@ -378,6 +378,7 @@ public final class ServerTrading {
         if (!events.isEmpty()) {
             markDirty();
         }
+        return events;
     }
 
     /** 把这名玩家的交易状态（各合约的下单参数、全部仓位、最近的成交、委托）发给他。 */

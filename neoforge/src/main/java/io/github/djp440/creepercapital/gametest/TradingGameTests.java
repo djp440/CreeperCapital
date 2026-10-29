@@ -94,6 +94,7 @@ final class TradingGameTests {
         });
         LimitOrderGameTests.register(function);
         ProtectionGameTests.register(function);
+        LiquidationGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
@@ -130,11 +131,15 @@ final class TradingGameTests {
                 List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005, MarginTiers.standard(125))),
                 List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3, MarginMode.CROSS)),
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
-                        Money.parse("-0.000001"), 86400)),
+                        Money.parse("-0.000001"), 86400),
+                        new PlayerTrade(8, player, DIAMOND, Side.LONG, TradeKind.LIQUIDATION, 950.5, 2500, Money.parse("11.88125"),
+                                Money.parse("-125.5"), 86500)),
                 List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
                                 OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
                         new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
                                 OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED),
+                        new Order(9, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1020, 500, 5, Money.ZERO,
+                                OrderStatus.CANCELLED, 0, Money.ZERO, 86011, 86500, CancelReason.LIQUIDATED),
                         new Order(5, player, DIAMOND, Side.LONG, OrderType.TAKE_PROFIT, 1100.5, 1000, 0, Money.ZERO,
                                 OrderStatus.OPEN, 0, Money.ZERO, 86020, 0, CancelReason.NONE,
                                 new OrderExtras(true, TriggerSource.MARK, 0, 0)),
@@ -404,11 +409,20 @@ final class TradingGameTests {
             TradingBook book = data.bind(accounts);
             helper.assertValueEqual(book.pool().balance(), Money.parse("1000000"), "新存档的池子初始 1,000,000 CRP");
             book.pool().fund(Money.parse("500.5"));
+            helper.assertValueEqual(book.fund().balance(), Money.ZERO, "新存档的风险保障基金是空的");
             book.open(alice, diamond, at, Side.LONG, 2000, 10);
             book.open(alice, ContractSpec.defaults().get(1),
                     new MarketSnapshot(100, "GUNPOWDERCRP", 100, 100, 100, 0.0001, 0), Side.SHORT, 5, 5);
             book.close(alice, ContractSpec.defaults().get(1),
                     new MarketSnapshot(101, "GUNPOWDERCRP", 99, 99, 99, 0.0001, 0), 2);
+            // 另一位玩家被强平，风险保障基金里有了钱（标记价格 903：亏掉几乎全部保证金，但没穿仓）
+            UUID bob = UUID.randomUUID();
+            accounts.deposit(bob, Money.parse("1000"));
+            book.open(bob, diamond, at, Side.LONG, 2000, 10);
+            var liquidations = book.checkLiquidations(player -> player.equals(bob),
+                    symbol -> DIAMOND.equals(symbol) ? 903 : 99, symbol -> diamond.marginTiers(), 102);
+            helper.assertValueEqual(liquidations.size(), 1, "这位玩家被强平");
+            helper.assertTrue(book.fund().balance().isPositive(), "强平的剩余保证金进了风险保障基金");
             data.setDirty();
             writer.saveAndJoin();
             writer.close();
@@ -423,8 +437,11 @@ final class TradingGameTests {
             helper.assertValueEqual(restored.position(alice, "GUNPOWDERCRP"), book.position(alice, "GUNPOWDERCRP"),
                     "重新加载后的火药仓位（部分平仓后）");
             helper.assertValueEqual(restored.trades(alice), book.trades(alice), "重新加载后的成交历史");
+            helper.assertValueEqual(restored.fund().balance(), book.fund().balance(), "重新加载后的风险保障基金余额");
+            helper.assertValueEqual(restored.trades(bob), book.trades(bob), "重新加载后的强平成交记录");
+            helper.assertValueEqual(restored.trades(bob).get(1).kind(), TradeKind.LIQUIDATION, "强平记录的类型");
             TradeResult next = restored.close(alice, diamond, at, 2000);
-            helper.assertValueEqual(((TradeResult.Filled) next).trade().id(), 4L, "恢复后接着编号");
+            helper.assertValueEqual(((TradeResult.Filled) next).trade().id(), 6L, "恢复后接着编号");
             reader.close();
         } finally {
             deleteRecursively(dataFolder);
@@ -624,6 +641,7 @@ final class TradingGameTests {
         TradingBook legacyBook = legacy.bind(new AccountBook());
         helper.assertValueEqual(legacyBook.position(alice, DIAMOND).orElseThrow().mode(), MarginMode.ISOLATED, "旧存档的仓位是逐仓");
         helper.assertValueEqual(legacyBook.marginMode(alice, DIAMOND), MarginMode.ISOLATED, "旧存档没有全仓设置");
+        helper.assertValueEqual(legacyBook.fund().balance(), Money.ZERO, "#12 之前的存档没有风险保障基金，读出来是 0");
         helper.succeed();
     }
 

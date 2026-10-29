@@ -149,8 +149,11 @@ final class LimitOrderGameTests {
         UUID onlineId = online.getUUID();
         UUID offlineId = offline.getUUID();
         double price = Math.floor(ServerMarket.snapshot(DIAMOND).lastPrice() * 0.99);
-        ServerTrading.handleOrder(online, buyLimit(price));
-        ServerTrading.handleOrder(offline, buyLimit(price));
+        // 低杠杆：成交后同一个行情步里价格已经大跌，10x 的多头会被强平（#12），而这里要验证的是委托成交
+        OrderPayload lowLeverage = new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, lots(),
+                Math.min(2, spec().maxLeverage()), OrderPayload.Execution.LIMIT, price);
+        ServerTrading.handleOrder(online, lowLeverage);
+        ServerTrading.handleOrder(offline, lowLeverage);
         helper.assertValueEqual(ServerTrading.book().orders().open(onlineId).size(), 1, "在线玩家挂单");
         helper.assertValueEqual(ServerTrading.book().orders().open(offlineId).size(), 1, "待离线玩家挂单");
         MockClient.leave(offline);
