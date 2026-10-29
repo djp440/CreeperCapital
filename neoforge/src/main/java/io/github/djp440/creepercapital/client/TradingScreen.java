@@ -179,6 +179,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，图表上从持仓线拖出一条触发价 = 最新价格 × {@code factor} 的止盈止损线（{@code dragging} 为 false 时是松开后的 ✓ / ✕ 确认态）。 */
+    public static void openWithChartEdit(double factor, boolean dragging) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devEdit(factor, dragging);
+        }
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();
@@ -211,6 +219,9 @@ public final class TradingScreen extends Screen {
         if (contractMenuOpen && event.key() == GLFW.GLFW_KEY_ESCAPE) {
             contractMenuOpen = false;
             return true;
+        }
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE && chart.cancelEdit()) {
+            return true; // Esc 先取消图上正在拖 / 等确认的止盈止损，不关界面
         }
         if (chart.settingsOpen() && event.key() == GLFW.GLFW_KEY_ESCAPE) {
             chart.closeSettings();
@@ -298,7 +309,7 @@ public final class TradingScreen extends Screen {
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
         if (event.button() == 0 && chart.isDragging()) {
-            return chart.mouseDragged(dx);
+            return chart.mouseDragged(event.y(), dx);
         }
         if (draggingSeam != null && event.button() == 0) {
             dragRatios = TradingLayout.dragged(width, height, tickerRows, dragRatios, draggingSeam, event.x(), event.y());

@@ -328,12 +328,10 @@ public final class OrderBook {
     private static TradeResult checkProtection(Side side, Protection protection, double reference) {
         boolean ok = !protection.isEmpty() && Double.isFinite(reference);
         if (ok && protection.takeProfit() != 0) {
-            double tp = protection.takeProfit();
-            ok = Double.isFinite(tp) && tp > 0 && (side == Side.LONG ? tp > reference : tp < reference);
+            ok = Protection.validTrigger(side, OrderType.TAKE_PROFIT, protection.takeProfit(), reference);
         }
         if (ok && protection.stopLoss() != 0) {
-            double sl = protection.stopLoss();
-            ok = Double.isFinite(sl) && sl > 0 && (side == Side.LONG ? sl < reference : sl > reference);
+            ok = Protection.validTrigger(side, OrderType.STOP_LOSS, protection.stopLoss(), reference);
         }
         return ok ? null : TradeResult.reject(TradeResult.Reason.INVALID_TRIGGER_PRICE,
                 String.format(Locale.ROOT, "%,.2f", reference));

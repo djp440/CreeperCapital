@@ -70,6 +70,7 @@ public final class ClientTrading {
         crossSymbols = Set.copyOf(payload.crossSymbols());
         orders = List.copyOf(payload.orders());
         funding = List.copyOf(payload.funding());
+        ChartOrderActions.onState(orders);
     }
 
     static void accept(AdlLightsPayload payload) {
@@ -84,6 +85,7 @@ public final class ClientTrading {
     static void accept(OrderResultPayload payload) {
         lastResult = new Message(payload.success(),
                 Component.translatable("message.creepercapital.order." + payload.code(), payload.args().toArray()));
+        ChartOrderActions.onResult(payload.success(), payload.code(), lastResult.text());
     }
 
     static void clear() {
@@ -100,6 +102,7 @@ public final class ClientTrading {
         triggerSource = TriggerSource.LAST;
         reduceOnly = false;
         lastResult = null;
+        ChartOrderActions.clear();
     }
 
     public static Optional<TradingParams> params(String symbol) {

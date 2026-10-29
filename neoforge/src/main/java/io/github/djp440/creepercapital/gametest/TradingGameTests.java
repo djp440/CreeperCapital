@@ -97,6 +97,7 @@ final class TradingGameTests {
         LimitOrderGameTests.register(function);
         FundingGameTests.register(function);
         ProtectionGameTests.register(function);
+        ChartOrderGameTests.register(function);
         LiquidationGameTests.register(function);
         AdlGameTests.register(function);
         StageOrderGameTests.register(function);

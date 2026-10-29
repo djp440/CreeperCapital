@@ -22,7 +22,7 @@ import net.neoforged.neoforge.common.NeoForge;
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
  * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
- * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）；58~62 是图上的持仓线、强平价、当前委托与买卖点（#35）。
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）；58~62 是图上的持仓线、强平价、当前委托与买卖点（#35）；63~64 是拖拽持仓线 tag 设止盈止损的拖动中与 ✓ / ✕ 确认态（#36）。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -430,7 +430,17 @@ final class ScreenshotScript {
             new ScreenshotStep("62", "切回绿涨红跌（#35）",
                     "涨跌色回到绿涨红跌，合约回到 DIAMONDCRP；图上的线与 tag 与 58 一致（价格随行情略有变化）。",
                     View.TRADING,
-                    both(scheme(ColorScheme.GREEN_UP), selectContract("DIAMONDCRP"))));
+                    both(scheme(ColorScheme.GREEN_UP), selectContract("DIAMONDCRP"))),
+            new ScreenshotStep("63", "拖拽持仓线 tag 设止盈：拖动中（#36，3 级验收）",
+                    "DIAMONDCRP 多仓（58 的场景）；等同于玩家按住持仓线 tag 往上拖到最新价 +0.8% 还没松手：那里多出一条绿色虚线（止盈色），"
+                            + "其 tag 显示「止盈 x,xxx.xx  预计盈亏 +x.xx」（预计盈亏 = 整个仓位 1.500 按这个触发价算的盈亏，为正），tag 上还没有 ✓ / ✕；"
+                            + "价格轴上同步有这个价格的绿色标签；它和其它 tag 一起错开、不重叠；图上的十字线因为在拖动而隐藏。",
+                    View.CHART_EDIT_DRAGGING),
+            new ScreenshotStep("64", "拖拽持仓线 tag 设止损：松开后的 ✓ / ✕ 确认态（#36，3 级验收）",
+                    "等同于往下拖到最新价 −0.6% 后松手：一条红色虚线（止损色）停在那里，tag「止损 x,xxx.xx  预计盈亏 −x.xx」（预计盈亏为负），"
+                            + "tag 右端隔一道竖线是两个按钮：绿色对勾 ✓（提交）和白色叉 ✕（取消），两个按钮等宽、与文字区之间留着一小段缝；"
+                            + "还没有提交，所以「当前委托」里没有这张止损；tag 不越出图表、不与其它 tag 重叠。",
+                    View.CHART_EDIT_CONFIRM));
 
     private ScreenshotScript() {
     }

@@ -66,6 +66,16 @@ public record OrderPayload(Action action, String symbol, long lots, int leverage
         this(action, symbol, lots, leverage, execution, price, 0, 0, TriggerSource.LAST, false);
     }
 
+    /**
+     * 给已有仓位补设一张止盈或止损（{@link Action#PROTECT}，只填这一项的触发价）：图表上拖拽持仓线 / 止盈止损线提交的就是它。
+     *
+     * @param takeProfit 是止盈（否则止损）
+     */
+    public static OrderPayload protect(String symbol, long lots, boolean takeProfit, double price, TriggerSource triggerSource) {
+        return new OrderPayload(Action.PROTECT, symbol, lots, 0, Execution.MARKET, 0, takeProfit ? price : 0,
+                takeProfit ? 0 : price, triggerSource, false);
+    }
+
     /** 附带的止盈止损。 */
     public Protection protection() {
         return new Protection(takeProfit, stopLoss, triggerSource);

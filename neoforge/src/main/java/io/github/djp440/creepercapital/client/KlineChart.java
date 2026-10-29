@@ -145,6 +145,9 @@ final class KlineChart {
                 }
             }
         }
+        if (button == 0 && overlay.mouseClicked(x, y)) {
+            return true; // 点在持仓线 / 委托的 tag 上：拖拽设止盈止损或点按钮
+        }
         if (button != 0 || !inPlot(x, y)) {
             return false;
         }
@@ -157,12 +160,20 @@ final class KlineChart {
         return true;
     }
 
+    /** 正在拖动：平移图表，或拖着止盈止损线。 */
     boolean isDragging() {
-        return dragging;
+        return dragging || overlay.isDragging();
     }
 
-    /** 拖动 {@code dx} 像素（向右为正，回看更早）。到头时记下方向，下一帧起泛黄光提示。 */
-    boolean mouseDragged(double dx) {
+    /**
+     * 拖动到 {@code y}、横向移动 {@code dx} 像素：拖着止盈止损线时线跟着鼠标纵坐标；否则平移图表（向右为正，回看更早），
+     * 到头时记下方向，下一帧起泛黄光提示。
+     */
+    boolean mouseDragged(double y, double dx) {
+        if (overlay.isDragging()) {
+            overlay.mouseDragged(y);
+            return true;
+        }
         if (!dragging || trackedCandles == null) {
             return false;
         }
@@ -178,6 +189,10 @@ final class KlineChart {
     }
 
     boolean mouseReleased(int button) {
+        if (button == 0 && overlay.isDragging()) {
+            overlay.mouseReleased();
+            return true;
+        }
         if (button == 0 && dragging) {
             dragging = false;
             return true;
@@ -202,6 +217,17 @@ final class KlineChart {
         plotValid = false;
         dragging = false;
         panel.close();
+        overlay.forget();
+    }
+
+    /** 按 Esc：取消正在拖或等确认的止盈止损；返回是否有东西被取消。 */
+    boolean cancelEdit() {
+        return overlay.cancelEdit();
+    }
+
+    /** 开发用（自动截图）：从持仓线拖出一条触发价 = 最新价格 × {@code factor} 的止盈止损线；{@code dragging} 为 false 时是等确认态。 */
+    void devEdit(double factor, boolean dragging) {
+        overlay.devEdit(factor, dragging);
     }
 
     /**
@@ -318,7 +344,7 @@ final class KlineChart {
         // 本人的买卖点、持仓线、强平价与当前委托（只看当前合约）；价格轴刻度避开它们在轴上的标记
         String symbol = ClientMarket.selectedSymbol().orElse(null);
         List<ChartOverlay.Line> overlayLines = symbol == null ? List.of() : overlay.lines(symbol);
-        List<Integer> markTops = overlay.axisMarkTops(overlayLines, scale);
+        List<Integer> markTops = overlay.axisMarkTops(overlayLines, scale, lastPriceY);
         extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, showVolume, volumeTop, volumeBottom, scale, lastPriceY,
                 markTops, overlay.axisMarkHeight());
         extractTimeAxis(graphics, period, candles, left, view, right, mainTop, volumeBottom, timeAxisTop);
@@ -359,7 +385,7 @@ final class KlineChart {
         if (showVolume) {
             graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, TradingPalette.TEXT_SECONDARY, false);
         }
-        overlay.extractTags(graphics, overlayLines, left, plotRight, scale);
+        overlay.extractTags(graphics, overlayLines, left, plotRight, scale, mouseX, mouseY);
         overlay.extractAxisMarks(graphics, overlayLines, markTops, axisLeft, right);
         extractEdgeFeedback(graphics, left, plotRight, mainTop, mainHeight);
         if (dragging) {
@@ -367,7 +393,7 @@ final class KlineChart {
         }
 
         // 十字线先画，最新价格标签后画：两个价格标签重叠时，最新价格盖在上面
-        int hovered = dragging || panel.contains(mouseX, mouseY) ? -1 : view.candleAt(mouseX);
+        int hovered = isDragging() || panel.contains(mouseX, mouseY) ? -1 : view.candleAt(mouseX);
         if (hovered >= 0 && mouseY >= mainTop && mouseY < volumeBottom) {
             int centerX = (int) Math.floor(view.centerX(hovered));
             extractCrosshair(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeBottom, centerX, mouseY, scale);
