@@ -40,6 +40,8 @@ final class KlineChart {
     /** 到头反馈（边缘黄光和提示）持续的毫秒数。 */
     private static final long EDGE_FEEDBACK_MILLIS = 900;
     private static final int EDGE_GLOW_WIDTH = 12;
+    /** 线形图面积填充在曲线处的最大不透明度。 */
+    private static final int AREA_ALPHA = 0x66;
 
     private final Font font;
 
@@ -226,7 +228,8 @@ final class KlineChart {
         for (int i = first; i <= last; i++) {
             maxVolume = Math.max(maxVolume, candles.get(i).volume());
         }
-        PriceScale scale = PriceScale.fit(mainTop, mainHeight, candles, first, last, false, List.of(ma));
+        ChartType type = ClientConfig.chartType();
+        PriceScale scale = PriceScale.fit(mainTop, mainHeight, candles, first, last, type == ChartType.LINE, List.of(ma));
 
         int lastPriceY = lastPriceLabelY(scale, scale.y(candles.get(candles.size() - 1).close()));
         extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeTop, volumeBottom, scale, lastPriceY);
@@ -235,16 +238,20 @@ final class KlineChart {
         // 缩放 / 平移时最左、最右的 K 线只露出一部分：裁在绘图区之内
         graphics.enableScissor(left, mainTop - 1, plotRight, volumeBottom + 1);
         int bodyWidth = Math.max(1, (int) Math.round(view.slotWidth() * BODY / SLOT));
+        if (type == ChartType.LINE) {
+            extractLine(graphics, candles, first, last, view, scale, mainTop + mainHeight);
+        }
         for (int i = first; i <= last; i++) {
             Candle candle = candles.get(i);
             int color = directionColor(candle);
             int wickX = (int) Math.floor(view.centerX(i));
             int bodyLeft = wickX - bodyWidth / 2;
-            graphics.fill(wickX, scale.y(candle.high()), wickX + 1, scale.y(candle.low()) + 1, color);
-            int bodyTop = scale.y(Math.max(candle.open(), candle.close()));
-            int bodyBottom = Math.max(bodyTop + 1, scale.y(Math.min(candle.open(), candle.close())) + 1);
-            graphics.fill(bodyLeft, bodyTop, bodyLeft + bodyWidth, bodyBottom, color);
-
+            if (type == ChartType.CANDLES) {
+                graphics.fill(wickX, scale.y(candle.high()), wickX + 1, scale.y(candle.low()) + 1, color);
+                int bodyTop = scale.y(Math.max(candle.open(), candle.close()));
+                int bodyBottom = Math.max(bodyTop + 1, scale.y(Math.min(candle.open(), candle.close())) + 1);
+                graphics.fill(bodyLeft, bodyTop, bodyLeft + bodyWidth, bodyBottom, color);
+            }
             if (maxVolume > 0) {
                 int barHeight = Math.max(1, (int) Math.round(candle.volume() / maxVolume * (volumeHeight - 1)));
                 graphics.fill(bodyLeft, volumeBottom - barHeight, bodyLeft + bodyWidth, volumeBottom,
@@ -353,14 +360,22 @@ final class KlineChart {
         }
     }
 
-    /** 均线：相邻两点之间按列补满竖向像素，线才是连续的；两端多画一根，露出一部分的 K 线处线也不断。 */
-    private static void extractAverage(GuiGraphicsExtractor graphics, double[] average, int first, int last,
-            ChartViewport.Projection view, PriceScale scale, int color) {
+    /** 一根线上相邻两点之间的某一列：横坐标和这一列线条占的竖向像素区间 {@code [top, bottom]}（含）。 */
+    @FunctionalInterface
+    private interface ColumnSink {
+        void column(int x, int top, int bottom);
+    }
+
+    /**
+     * 折线：相邻两点之间按列补满竖向像素，线才是连续的；两端多取一根，露出一部分的 K 线处线也不断；NaN 点断开。
+     */
+    private static void traceColumns(double[] values, int first, int last, ChartViewport.Projection view, PriceScale scale,
+            ColumnSink sink) {
         int previousX = 0;
         int previousY = 0;
         boolean hasPrevious = false;
-        for (int i = Math.max(0, first - 1); i <= Math.min(average.length - 1, last + 1); i++) {
-            double value = average[i];
+        for (int i = Math.max(0, first - 1); i <= Math.min(values.length - 1, last + 1); i++) {
+            double value = values[i];
             if (Double.isNaN(value)) {
                 hasPrevious = false;
                 continue;
@@ -371,13 +386,38 @@ final class KlineChart {
                 for (int column = previousX; column < x; column++) {
                     int from = previousY + Math.round((float) (y - previousY) * (column - previousX) / (x - previousX));
                     int to = previousY + Math.round((float) (y - previousY) * (column + 1 - previousX) / (x - previousX));
-                    graphics.fill(column, Math.min(from, to), column + 1, Math.max(from, to) + 1, color);
+                    sink.column(column, Math.min(from, to), Math.max(from, to));
                 }
             }
             previousX = x;
             previousY = y;
             hasPrevious = true;
         }
+    }
+
+    private static void extractAverage(GuiGraphicsExtractor graphics, double[] average, int first, int last,
+            ChartViewport.Projection view, PriceScale scale, int color) {
+        traceColumns(average, first, last, view, scale, (x, top, bottom) -> graphics.fill(x, top, x + 1, bottom + 1, color));
+    }
+
+    /** 线形图：收盘价连成 2 像素粗的线，线下是自上而下渐隐的面积填充；线色随可见区间的涨跌（{@link ChartTrend}）。 */
+    private static void extractLine(GuiGraphicsExtractor graphics, List<Candle> candles, int first, int last,
+            ChartViewport.Projection view, PriceScale scale, int mainBottom) {
+        double[] closes = new double[candles.size()];
+        for (int i = 0; i < closes.length; i++) {
+            closes[i] = candles.get(i).close();
+        }
+        int color = ChartType.lineColor(candles, first, last);
+        int mainTop = scale.top();
+        traceColumns(closes, first, last, view, scale, (x, top, bottom) -> {
+            // 面积填充：透明度只由纵坐标决定（越靠上越浓，到主图区下沿为 0），相邻列才衔接得上
+            int alpha = (int) (AREA_ALPHA * (mainBottom - top) / (double) Math.max(1, mainBottom - mainTop));
+            if (bottom + 2 < mainBottom) {
+                graphics.fillGradient(x, bottom + 2, x + 1, mainBottom, TradingPalette.withAlpha(color, Math.max(0, alpha)),
+                        TradingPalette.withAlpha(color, 0));
+            }
+            graphics.fill(x, top, x + 1, bottom + 2, color);
+        });
     }
 
     /**

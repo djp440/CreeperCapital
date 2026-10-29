@@ -3,6 +3,7 @@ package io.github.djp440.creepercapital.dev.screenshot;
 import java.util.List;
 import java.util.function.Consumer;
 
+import io.github.djp440.creepercapital.client.ChartType;
 import io.github.djp440.creepercapital.client.ClientConfig;
 import io.github.djp440.creepercapital.client.ClientKlines;
 import io.github.djp440.creepercapital.client.ClientMarket;
@@ -21,7 +22,7 @@ import net.neoforged.neoforge.common.NeoForge;
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
  * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
- * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局。
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -348,7 +349,24 @@ final class ScreenshotScript {
             new ScreenshotStep("48", "图表拖到缓存最旧一根（#33，3 级验收）",
                     "往回看到缓存里最早的一根：它贴着绘图区左边缘；左边缘泛一层向右渐隐的黄光，其右侧有黄字提示框「已到最早的缓存 K 线」；"
                             + "提示框在主图区内、不盖住图例，也不越出图表。",
-                    View.CHART_AT_OLDEST));
+                    View.CHART_AT_OLDEST),
+            new ScreenshotStep("49", "线形图：绿涨红跌（#32，3 级验收）",
+                    "1h 周期、绿涨红跌；图表工具区（周期页签右侧、卡片右端）有「K线 | 线形」两个页签，「线形」为黄字加下划线；"
+                            + "图表区是一条 2 像素粗的收盘价折线，没有蜡烛，线下是自上而下渐隐的同色面积填充（靠近线最浓，到成交量副图上方消失）；"
+                            + "线色规则：可见区间最后一根收盘价不低于第一根开盘价为涨色，否则为跌色——这一段 1h 行情是从约 1,2xx 跌到 1,0xx（最后收盘低于第一根开盘），所以线与面积是跌色（红）；"
+                            + "均线、成交量柱（仍按每根涨跌着色）、右侧价格轴、最新价格虚线与标签、时间轴、图例都照常；价格轴范围只贴着收盘价的区间；无重叠和乱码。",
+                    View.TRADING,
+                    both(both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.LINE)), select(CandlePeriod.H1))),
+            new ScreenshotStep("50", "线形图：红涨绿跌（#32，3 级验收）",
+                    "与 49 同一份数据、同一个视口，只是涨跌色换成红涨绿跌：这段行情是跌，所以线与面积填充变为跌色（绿）；"
+                            + "价格轴最新价格标签、成交量柱、行情栏涨跌色、盘口颜色随之变化；图表工具区「线形」仍是选中状态。",
+                    View.TRADING,
+                    scheme(ColorScheme.RED_UP)),
+            new ScreenshotStep("51", "切回 K 线图（#32，3 级验收）",
+                    "涨跌色回到绿涨红跌、图表类型切回 K 线：图表工具区「K线」为黄字加下划线，图表区重新是蜡烛图；"
+                            + "周期仍是 1h，图表立即显示（没有「加载中」闪现——切换类型复用已缓存的 K 线，不重新请求历史）。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.CANDLES))));
 
     private ScreenshotScript() {
     }
@@ -356,6 +374,11 @@ final class ScreenshotScript {
     /** 切换涨跌色方案（写进客户端配置，与交易界面上的切换按钮、模组配置界面改的是同一项）。 */
     private static Consumer<Minecraft> scheme(ColorScheme scheme) {
         return minecraft -> ClientConfig.setColorScheme(scheme);
+    }
+
+    /** 切换图表类型（写进客户端配置，与交易界面上的页签、模组配置界面改的是同一项）。 */
+    private static Consumer<Minecraft> chartType(ChartType type) {
+        return minecraft -> ClientConfig.setChartType(type);
     }
 
     /** 设置交易界面的区域比例（等同于玩家拖拽边框后松手，写进客户端配置）；全 0 即缺省布局。 */

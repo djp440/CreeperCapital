@@ -627,6 +627,7 @@ public final class TradingScreen extends Screen {
                 CandlePeriod period = periods[i];
                 register(boxes[i], () -> ClientKlines.select(period));
             }
+            extractChartTypeToggle(graphics, card, boxes[periods.length - 1][2], rowTop, mouseX, mouseY);
         }
         graphics.horizontalLine(card.left(), card.right() - 1, contentTop, TradingPalette.DIVIDER);
         contentTop += 1;
@@ -649,6 +650,39 @@ public final class TradingScreen extends Screen {
             marketColumn.extractPage(graphics, card.left(), contentTop, card.right(), card.bottom(), snapshot.symbol(), snapshot);
         }
         graphics.disableScissor();
+    }
+
+    /**
+     * 周期页签右侧、卡片右端的图表类型切换（K 线 / 线形）：先试正常间距，再试收紧间距，
+     * 都放不下就退成一个显示当前类型、点一下切到另一种的按钮；连这个也放不下就不画。
+     */
+    private void extractChartTypeToggle(GuiGraphicsExtractor graphics, TradingLayout.Rect card, int periodsEnd, int rowTop,
+            int mouseX, int mouseY) {
+        ChartType current = ClientConfig.chartType();
+        ChartType[] types = ChartType.values();
+        Component[] labels = {types[0].label(), types[1].label()};
+        int limit = periodsEnd + 8;
+        int right = card.right() - 4;
+        for (int padding : new int[] {6, 4, 2}) {
+            int total = TabStrip.width(font, labels, padding);
+            if (right - total >= limit) {
+                int left = right - total;
+                graphics.verticalLine(left - 3, rowTop + 3, rowTop + TAB_HEIGHT - 4, TradingPalette.DIVIDER);
+                int[][] boxes = TabStrip.extract(graphics, font, left, rowTop, TAB_HEIGHT, labels, current.ordinal(), padding,
+                        mouseX, mouseY);
+                for (int i = 0; i < types.length; i++) {
+                    ChartType type = types[i];
+                    register(boxes[i], () -> ClientConfig.setChartType(type));
+                }
+                return;
+            }
+        }
+        Component[] single = {current.label()};
+        int total = TabStrip.width(font, single, 3);
+        if (right - total >= limit) {
+            int[][] boxes = TabStrip.extract(graphics, font, right - total, rowTop, TAB_HEIGHT, single, 0, 3, mouseX, mouseY);
+            register(boxes[0], () -> ClientConfig.setChartType(current.next()));
+        }
     }
 
     private void showColumnPage(MarketColumn.Page page) {
