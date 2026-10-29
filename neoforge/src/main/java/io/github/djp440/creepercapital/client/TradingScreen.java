@@ -7,6 +7,8 @@ import org.lwjgl.glfw.GLFW;
 
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
@@ -72,7 +74,7 @@ public final class TradingScreen extends Screen {
     }
 
     /** 一个可点击的区域（页签、切换按钮等），每帧渲染时重新登记。 */
-    private record Hit(int left, int top, int right, int bottom, Runnable action) {
+    private record Hit(int left, int top, int right, int bottom, Cue cue, Runnable action) {
         boolean contains(double x, double y) {
             return x >= left && x < right && y >= top && y < bottom;
         }
@@ -238,6 +240,9 @@ public final class TradingScreen extends Screen {
         }
         if ((orderPanel.anyInputFocused() || chart.anyInputFocused()) && event.key() != GLFW.GLFW_KEY_ESCAPE) {
             // 在数量 / 委托价 / 止盈止损价 / 均线周期输入框里打字时，快捷键字母不能关掉界面
+            if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
+                CuePlayer.play(Cue.INPUT_CONFIRM);
+            }
             return super.keyPressed(event);
         }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
@@ -302,6 +307,7 @@ public final class TradingScreen extends Screen {
             }
             for (Hit hit : List.copyOf(hits)) {
                 if (hit.contains(event.x(), event.y())) {
+                    CuePlayer.play(hit.cue());
                     hit.action().run();
                     return true;
                 }
@@ -355,6 +361,7 @@ public final class TradingScreen extends Screen {
     private boolean clickedContractControls(double x, double y) {
         List<String> symbols = ClientMarket.symbols();
         if (symbols.size() > 1 && symbolButton.contains(x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             contractMenuOpen = !contractMenuOpen;
             return true;
         }
@@ -363,6 +370,7 @@ public final class TradingScreen extends Screen {
         }
         int index = menuIndexAt(symbols, x, y);
         if (index >= 0) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             ClientMarket.select(symbols.get(index));
         }
         contractMenuOpen = false;
@@ -485,7 +493,7 @@ public final class TradingScreen extends Screen {
         int buttonWidth = font.width(label) + TOGGLE_PADDING * 2;
         int left = header.right() - TradingLayout.GAP - PAD - buttonWidth;
         boolean enabled = !layoutRatios().isDefault();
-        Hit hit = new Hit(left, header.top() + 1, left + buttonWidth, header.bottom() - 1, this::resetLayout);
+        Hit hit = new Hit(left, header.top() + 1, left + buttonWidth, header.bottom() - 1, Cue.BUTTON_CLICK, this::resetLayout);
         graphics.fill(hit.left(), hit.top(), hit.right(), hit.bottom(),
                 enabled && hit.contains(mouseX, mouseY) ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
         graphics.text(font, label, left + TOGGLE_PADDING, GuiText.centeredY(font, hit.top(), hit.bottom()),
@@ -574,7 +582,7 @@ public final class TradingScreen extends Screen {
 
     /** 涨跌色切换按钮：涨色块、跌色块和当前方案名；点一下换成另一种方案，立即生效并写回客户端配置。 */
     private void extractSchemeToggle(GuiGraphicsExtractor graphics, int left, int top, int toggleWidth, int mouseX, int mouseY) {
-        Hit hit = new Hit(left, top, left + toggleWidth, top + TOGGLE_HEIGHT,
+        Hit hit = new Hit(left, top, left + toggleWidth, top + TOGGLE_HEIGHT, Cue.BUTTON_CLICK,
                 () -> ClientConfig.setColorScheme(ClientConfig.colorScheme().toggled()));
         graphics.fill(hit.left(), hit.top(), hit.right(), hit.bottom(),
                 hit.contains(mouseX, mouseY) ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
@@ -733,7 +741,7 @@ public final class TradingScreen extends Screen {
     }
 
     private void register(int[] box, Runnable action) {
-        hits.add(new Hit(box[0], box[1], box[2], box[3], action));
+        hits.add(new Hit(box[0], box[1], box[2], box[3], Cue.TAB_SWITCH, action));
     }
 
     /** 底部表格区卡片：一排页签（放不下时收紧间距、换短名称）和当前页的数据。 */

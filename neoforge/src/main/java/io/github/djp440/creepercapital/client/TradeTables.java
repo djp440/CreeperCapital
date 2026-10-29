@@ -7,6 +7,8 @@ import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTime;
@@ -281,6 +283,7 @@ final class TradeTables {
     boolean mouseClicked(double x, double y) {
         for (Button button : buttons) {
             if (button.contains(x, y)) {
+                CuePlayer.play(Cue.BUTTON_CLICK);
                 button.action().run();
                 return true;
             }

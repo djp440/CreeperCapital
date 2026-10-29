@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Locale;
 
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.kline.Indicators;
@@ -140,6 +142,7 @@ final class KlineChart {
         if (button == 0 && plotValid) {
             for (LegendHit hit : List.copyOf(legendHits)) {
                 if (hit.contains(x, y)) {
+                    CuePlayer.play(Cue.TAB_SWITCH);
                     hit.action().run();
                     return true;
                 }

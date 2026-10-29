@@ -15,6 +15,7 @@ NeoForge 26.1.2 模组（Java 25）。两个 Gradle 子项目合成同一个 mod
 - 合约由服务端配置文件 `config/creepercapital-contracts.json` 定义（不存在时自动生成 DIAMONDCRP 与 GUNPOWDERCRP，改动重启生效）。OP 用 `/creeper dev market jump <合约> <百分比>` 让合约在下一个行情步跳跃，详见 ADR-0006。
 - 合约定义里还有点差 `spread`（绝对价格间隔，缺省为起始价格的 0.05%）、最大杠杆 `max_leverage`、数量精度 `quantity_decimals`，都是可选项；已存在的配置文件缺这些字段时用缺省值（20x、3 位小数），想要新内置合约的值需自己加字段或删掉文件重新生成。另有可选的盘口深度 `depth_slippage`（1 万 CRP 市价单的平均滑点，缺省 0.1%，0 = 无限深）、杠杆分档 `maintenance_tiers`（每档 `up_to` / `max_leverage` / `maintenance_rate`，缺省按最大杠杆自动生成）、持仓总量上限比例 `open_interest_ratio`（占池子权益，缺省 0.5）；同样缺字段时用缺省且不改写文件。清算费率（0.5%）是常量，不在配置里。
 - OP 用 `/creeper dev market funding <1..30>` 精确推进到后续 N 个资金费结算点（每 8 个市场小时一次）；`/creeper dev market advance <步数>` 只广播最后一步，会跳过中间步的挂单触发、强平与资金费；另有 `market pause|resume`。
+- 交易音效（#40）全部用原版 `SoundEvents`：事件 → 音色类别 / 音量 / 音调在 `client/sound/Cue`，结果码 → 事件在 `ResultCues`，事件 → 原版音效绑定在 `CuePlayer.soundOf`。客户端配置 `soundEnabled`（总开关，缺省开）与 `soundVolume`（0..1，缺省 1）。服务端结果音随 `OrderResultPayload` 到达就响（交易界面关着也响），离线汇总靠客户端认聊天消息的标题翻译键（不改协议）。新增下单结果码须登记进 `ResultCues` 的映射 / 静音 / 拒单三表之一，否则单测失败。
 - OP 用 `/creeper dev pool fund <数量>` 给流动性池注资（池子初始 1,000,000 CRP）。
 - OP 用 `/creeper dev deposit|withdraw <玩家> <数量>` 给合约账户充值或扣除 CRP（金额为 6 位小数的定点数，离线玩家同样有效）。
 - 开发运行的 DEBUG 日志写在仓库根目录 `logs/yyyy-MM-dd HH-mm-ss.log`，每次启动一个文件。

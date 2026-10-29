@@ -3,7 +3,7 @@ package io.github.djp440.creepercapital.client;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
- * 客户端配置（{@code config/creepercapital-client.toml}）：涨跌色方案、图表类型、图表指标设置，以及交易界面拖拽出来的区域比例。
+ * 客户端配置（{@code config/creepercapital-client.toml}）：涨跌色方案、图表类型、图表指标设置、交易音效（总开关与音量），以及交易界面拖拽出来的区域比例。
  * 涨跌色可以在模组列表的「配置」里改，也可以点交易界面行情栏右端的切换按钮；两处改的是同一个配置项，改完立即生效。
  * 区域比例由交易界面里拖拽边框写入，「恢复默认布局」把它们清零；配置里 0 表示用缺省尺寸。
  */
@@ -12,6 +12,8 @@ public final class ClientConfig {
     private static final ModConfigSpec.EnumValue<ColorScheme> COLOR_SCHEME;
     private static final ModConfigSpec.EnumValue<ChartType> CHART_TYPE;
     private static final ModConfigSpec.ConfigValue<String> INDICATORS;
+    private static final ModConfigSpec.BooleanValue SOUND_ENABLED;
+    private static final ModConfigSpec.DoubleValue SOUND_VOLUME;
     private static final ModConfigSpec.DoubleValue LAYOUT_ORDER_PANEL;
     private static final ModConfigSpec.DoubleValue LAYOUT_COLUMN;
     private static final ModConfigSpec.DoubleValue LAYOUT_TABLE;
@@ -27,6 +29,12 @@ public final class ClientConfig {
         INDICATORS = builder
                 .comment("Chart indicators, edited via the gear next to the chart legend: ma=<period>:<color index>:<visible 0|1>,... (up to 5 lines, period 1-500);volume=<0|1>")
                 .define("indicators", IndicatorSettings.defaults().encode());
+        SOUND_ENABLED = builder
+                .comment("Trading sound effects (vanilla sounds): master switch. true = on (default)")
+                .define("soundEnabled", true);
+        SOUND_VOLUME = builder
+                .comment("Trading sound effects: volume, 0 = silent, 1 = full (default). Scales on top of Minecraft's own volume sliders.")
+                .defineInRange("soundVolume", 1.0, 0.0, 1.0);
         LAYOUT_ORDER_PANEL = builder
                 .comment("Trading screen: order panel width as a fraction of the screen width. 0 = default size. Set by dragging the borders.")
                 .defineInRange("layoutOrderPanelRatio", 0.0, 0.0, 1.0);
@@ -98,6 +106,16 @@ public final class ClientConfig {
     /** 开发用（自动截图）：用配置字符串（{@link IndicatorSettings#encode()} 的格式）设置指标，等同于玩家在浮层里改完。 */
     public static void setIndicatorsRaw(String encoded) {
         setIndicators(IndicatorSettings.decode(encoded));
+    }
+
+    /** 交易音效总开关；配置还没加载时按缺省的开启。 */
+    public static boolean soundEnabled() {
+        return !SPEC.isLoaded() || SOUND_ENABLED.get();
+    }
+
+    /** 交易音效音量（0 到 1）；配置还没加载时按缺省的 1。 */
+    public static double soundVolume() {
+        return SPEC.isLoaded() ? SOUND_VOLUME.get() : 1.0;
     }
 
     /** 玩家拖拽出来的区域比例；配置还没加载时用缺省布局。 */

@@ -36,6 +36,8 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 public final class ServerOfflineSummary {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String KEY_PREFIX = "message.creepercapital.offline_summary.";
+    /** 汇总消息标题的翻译键；客户端靠它认出这条聊天消息，在收到时响一声提示（不改协议）。 */
+    public static final String HEADER_KEY = KEY_PREFIX + "header";
 
     private static @Nullable OfflineSummarySavedData data;
 
@@ -95,7 +97,7 @@ public final class ServerOfflineSummary {
 
     /** 汇总通知：标题、每类有事件的一行（次数与金额）、提示去哪看明细。一条聊天消息，行之间用换行连接。 */
     public static Component message(Summary summary) {
-        MutableComponent message = Component.translatable(KEY_PREFIX + "header").withStyle(ChatFormatting.GOLD);
+        MutableComponent message = Component.translatable(HEADER_KEY).withStyle(ChatFormatting.GOLD);
         for (EventType type : EventType.values()) {
             long count = summary.count(type);
             if (count > 0) {

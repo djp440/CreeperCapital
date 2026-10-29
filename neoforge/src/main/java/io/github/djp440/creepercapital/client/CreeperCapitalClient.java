@@ -5,6 +5,8 @@ import org.lwjgl.glfw.GLFW;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import io.github.djp440.creepercapital.CreeperCapital;
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
@@ -13,7 +15,9 @@ import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
 import io.github.djp440.creepercapital.network.TradingStatePayload;
+import io.github.djp440.creepercapital.server.ServerOfflineSummary;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -21,6 +25,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
+import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -47,6 +52,7 @@ public final class CreeperCapitalClient {
         modBus.addListener(CreeperCapitalClient::onRegisterPayloadHandlers);
         NeoForge.EVENT_BUS.addListener(CreeperCapitalClient::onClientTick);
         NeoForge.EVENT_BUS.addListener(CreeperCapitalClient::onLoggingOut);
+        NeoForge.EVENT_BUS.addListener(CreeperCapitalClient::onSystemChat);
     }
 
     private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
@@ -68,6 +74,17 @@ public final class CreeperCapitalClient {
     private static void onClientTick(ClientTickEvent.Post event) {
         while (OPEN_TRADING_KEY.consumeClick()) {
             TradingScreen.open();
+        }
+    }
+
+    /**
+     * 离线事件汇总是服务端用 sendSystemMessage 发的一条聊天消息，没有专门的载荷（不改协议）：这里认出它的标题翻译键，
+     * 每条汇总只响一次提示音。聊天栏文字本身不变。
+     */
+    private static void onSystemChat(ClientChatReceivedEvent.System event) {
+        if (!event.isOverlay() && event.getMessage().getContents() instanceof TranslatableContents contents
+                && contents.getKey().equals(ServerOfflineSummary.HEADER_KEY)) {
+            CuePlayer.play(Cue.OFFLINE_SUMMARY);
         }
     }
 

@@ -7,6 +7,8 @@ import java.util.OptionalLong;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
@@ -546,14 +548,17 @@ final class OrderPanel {
     /** 处理一次点击；返回点击是否落在面板的按钮上（落在输入框上的点击交给输入框自己处理）。 */
     boolean mouseClicked(double x, double y, String symbol) {
         if (inside(modeBox, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             ClientTrading.toggleMarginMode(symbol);
             return true;
         }
         if (inside(marketTab, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             ClientTrading.setLimitMode(false);
             return true;
         }
         if (inside(limitTab, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             if (!ClientTrading.limitMode() && priceBox.getValue().isEmpty()) {
                 // 第一次切到限价：委托价预填最新价格，省得从零输入
                 ClientMarket.snapshot(symbol).ifPresent(snapshot -> priceBox.setValue(
@@ -563,42 +568,52 @@ final class OrderPanel {
             return true;
         }
         if (inside(estimateTab, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             ClientTrading.setProtectionPage(false);
             return true;
         }
         if (inside(protectionTab, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             ClientTrading.setProtectionPage(true);
             return true;
         }
         if (ClientTrading.protectionPage() && inside(sourceBox, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             ClientTrading.toggleTriggerSource();
             return true;
         }
         if (ClientTrading.protectionPage() && inside(reduceBox, x, y)) {
+            CuePlayer.play(Cue.TAB_SWITCH);
             ClientTrading.setReduceOnly(!ClientTrading.reduceOnly());
             return true;
         }
         if (inside(protectBox, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             protect(symbol);
             return true;
         }
         if (inside(minus, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             ClientTrading.lowerLeverage(symbol);
             return true;
         }
         if (inside(plus, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             ClientTrading.raiseLeverage(symbol);
             return true;
         }
         if (inside(buyBox, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             open(OrderPayload.Action.OPEN_LONG, symbol);
             return true;
         }
         if (inside(sellBox, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             open(OrderPayload.Action.OPEN_SHORT, symbol);
             return true;
         }
         if (inside(closeBox, x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             close(symbol);
             return true;
         }

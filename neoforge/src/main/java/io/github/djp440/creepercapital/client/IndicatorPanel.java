@@ -6,6 +6,8 @@ import java.util.OptionalInt;
 
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.client.IndicatorSettings.MaLine;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -138,6 +140,7 @@ final class IndicatorPanel {
         if (button == 0) {
             for (Zone zone : List.copyOf(zones)) {
                 if (zone.contains(x, y)) {
+                    CuePlayer.play(Cue.BUTTON_CLICK);
                     zone.action().run();
                     break;
                 }

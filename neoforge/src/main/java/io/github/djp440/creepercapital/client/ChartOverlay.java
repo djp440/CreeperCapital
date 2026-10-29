@@ -7,6 +7,8 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.trading.MarginMath;
@@ -123,11 +125,14 @@ final class ChartOverlay {
         if (hit.zone() == ChartTagHits.Zone.BUTTON) {
             if (line.kind() == Kind.EDIT) {
                 if (hit.button() == 0) {
+                    CuePlayer.play(Cue.CHART_CONFIRM);
                     confirmEdit();
                 } else {
+                    CuePlayer.play(Cue.CHART_DISMISS);
                     edit = null;
                 }
             } else if (line.kind() == Kind.ORDER && line.order() != null && !ChartOrderActions.cancelling(line.order().id())) {
+                CuePlayer.play(Cue.CHART_CANCEL_ORDER);
                 ChartOrderActions.cancel(line.order().id());
             }
         } else if (hit.zone() == ChartTagHits.Zone.DRAG && symbol != null) {
@@ -220,6 +225,7 @@ final class ChartOverlay {
 
     /** 不合法：用服务端拒单的同一句文案提示（带此刻的参考价），线还原。 */
     private static void rejectInvalid(EditInfo info) {
+        CuePlayer.play(Cue.REJECTED);
         ChartOrderActions.showNotice(Component.translatable("message.creepercapital.order.invalid_trigger_price",
                 MarketFormat.price(info.reference())), true);
     }
