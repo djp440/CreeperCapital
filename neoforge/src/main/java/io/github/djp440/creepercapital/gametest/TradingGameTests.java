@@ -15,6 +15,10 @@ import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderStatus;
+import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -22,6 +26,7 @@ import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradeResult;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
 import io.github.djp440.creepercapital.network.TradingStatePayload;
@@ -70,6 +75,7 @@ final class TradingGameTests {
                 throw new UncheckedIOException(e);
             }
         });
+        LimitOrderGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
@@ -85,13 +91,24 @@ final class TradingGameTests {
         OrderPayload order = new OrderPayload(OrderPayload.Action.OPEN_SHORT, DIAMOND, 2500, 25);
         OrderPayload.STREAM_CODEC.encode(buffer, order);
         helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), order, "下单载荷");
+        OrderPayload limit = new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000, 10, OrderPayload.Execution.LIMIT,
+                987.65);
+        OrderPayload.STREAM_CODEC.encode(buffer, limit);
+        helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), limit, "限价下单载荷");
+        CancelOrderPayload cancel = new CancelOrderPayload(42);
+        CancelOrderPayload.STREAM_CODEC.encode(buffer, cancel);
+        helper.assertValueEqual(CancelOrderPayload.STREAM_CODEC.decode(buffer), cancel, "撤单载荷");
 
         UUID player = UUID.randomUUID();
         TradingStatePayload state = new TradingStatePayload(
                 List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005)),
                 List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3)),
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
-                        Money.parse("-0.000001"), 86400)));
+                        Money.parse("-0.000001"), 86400)),
+                List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
+                                OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
+                        new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
+                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)));
         TradingStatePayload.STREAM_CODEC.encode(buffer, state);
         helper.assertValueEqual(TradingStatePayload.STREAM_CODEC.decode(buffer), state, "交易状态载荷");
 
@@ -101,16 +118,19 @@ final class TradingGameTests {
         helper.succeed();
     }
 
-    private static ServerPlayer trader(GameTestHelper helper, String name, String deposit) {
+    static ServerPlayer trader(GameTestHelper helper, String name, String deposit) {
         ServerPlayer player = MockClient.join(helper, name);
         ServerAccounts.deposit(helper.getLevel().getServer(), player.getUUID(), Money.parse(deposit));
         return player;
     }
 
     /** 清理：平掉仓位、取走余额，让共用的账本不留测试痕迹（资金流向池子与玩家之间，总额不变）。 */
-    private static void finish(ServerPlayer player) {
+    static void finish(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         TradingBook book = ServerTrading.book();
+        for (Order order : book.orders().open(player.getUUID())) {
+            book.orders().cancel(player.getUUID(), order.id(), 0);
+        }
         for (Position position : book.positions(player.getUUID())) {
             book.close(player.getUUID(), ServerMarket.spec(position.symbol()), ServerMarket.snapshot(position.symbol()),
                     position.lots());
@@ -122,15 +142,16 @@ final class TradingGameTests {
         MockClient.leave(player);
     }
 
-    private static Money total(UUID player) {
-        Money total = ServerTrading.poolBalance().plus(ServerAccounts.balance(player));
+    static Money total(UUID player) {
+        Money total = ServerTrading.poolBalance().plus(ServerAccounts.balance(player))
+                .plus(ServerTrading.book().orders().frozen(player));
         for (Position position : ServerTrading.book().positions(player)) {
             total = total.plus(position.margin());
         }
         return total;
     }
 
-    private static <T> T last(List<T> list) {
+    static <T> T last(List<T> list) {
         return list.get(list.size() - 1);
     }
 
