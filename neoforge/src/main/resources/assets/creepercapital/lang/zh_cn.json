@@ -22,5 +22,16 @@
   "commands.creepercapital.market.resumed": "市场已恢复",
   "commands.creepercapital.market.advanced": "市场已快进 %s 个行情步",
   "commands.creepercapital.market.jump": "%s 将在下一个行情步跳跃 %s%%",
-  "commands.creepercapital.market.jump.unknown": "没有这个合约：%s"
+  "commands.creepercapital.market.jump.unknown": "没有这个合约：%s",
+  "screen.creepercapital.trading.table.assets": "资产",
+  "screen.creepercapital.trading.assets.wallet": "钱包余额",
+  "screen.creepercapital.trading.assets.unrealized_pnl": "未实现盈亏",
+  "screen.creepercapital.trading.assets.margin_balance": "保证金余额",
+  "screen.creepercapital.trading.assets.available_balance": "可用余额",
+  "commands.creepercapital.account.deposited": "已向 %s 充值 %s CRP，余额 %s CRP",
+  "commands.creepercapital.account.withdrawn": "已从 %s 扣除 %s CRP，余额 %s CRP",
+  "commands.creepercapital.account.invalid_amount": "金额不合法（正数，最多 6 位小数）：%s",
+  "commands.creepercapital.account.insufficient": "%s 的余额不足：余额 %s CRP，需要 %s CRP",
+  "commands.creepercapital.account.unknown_player": "没有这个玩家：%s（没进过这个世界，也没有账户）",
+  "commands.creepercapital.account.overflow": "%s 的余额将超出上限"
 }
