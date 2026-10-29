@@ -58,6 +58,8 @@ final class TradingGameTests {
                 TradingGameTests::marketOrderFillsAtLastPricePlusHalfSpreadAndConservesFunds);
         function.accept("short_order_fills_below_last_price_and_closes_partially",
                 TradingGameTests::shortOrderFillsBelowLastPriceAndClosesPartially);
+        function.accept("big_order_slips_along_the_curve_but_leaves_the_price_alone",
+                TradingGameTests::bigOrderSlipsAlongTheCurveButLeavesThePriceAlone);
         function.accept("rejected_orders_explain_why_and_change_nothing", TradingGameTests::rejectedOrdersExplainWhyAndChangeNothing);
         function.accept("orders_are_rejected_while_the_market_is_paused", TradingGameTests::ordersAreRejectedWhileTheMarketIsPaused);
         function.accept("dev_pool_fund_is_op_only", TradingGameTests::devPoolFundIsOpOnly);
@@ -86,7 +88,7 @@ final class TradingGameTests {
 
         UUID player = UUID.randomUUID();
         TradingStatePayload state = new TradingStatePayload(
-                List.of(new TradingParams(DIAMOND, 0.5, 125, 3)),
+                List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005)),
                 List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3)),
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
                         Money.parse("-0.000001"), 86400)));
@@ -132,7 +134,7 @@ final class TradingGameTests {
         return list.get(list.size() - 1);
     }
 
-    /** 开多再平仓：成交价是最新价格 ± 半个点差，保证金与手续费按规则划转，玩家与池子的总额不变，结果与状态同步给玩家。 */
+    /** 开多再平仓（小单，在第一档之内）：成交价是最新价格 ± 半个点差，保证金与手续费按规则划转，玩家与池子的总额不变，结果与状态同步给玩家。 */
     private static void marketOrderFillsAtLastPricePlusHalfSpreadAndConservesFunds(GameTestHelper helper) {
         ServerPlayer player = trader(helper, "OrderTrader1", "1000");
         try {
@@ -142,12 +144,13 @@ final class TradingGameTests {
             Money poolBefore = ServerTrading.poolBalance();
             Money totalBefore = total(id);
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000, 10));
+            // 0.1 个钻石，名义价值约 100 CRP，在第一档（约 500 CRP）之内，没有滑点
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 100, 10));
 
             Position position = ServerTrading.book().position(id, DIAMOND).orElseThrow();
             double expectedFill = snapshot.lastPrice() + spec.spread() / 2;
             helper.assertValueEqual(position.entryPrice(), expectedFill, "多头成交价 = 最新价格 + 半个点差");
-            helper.assertValueEqual(position.lots(), 1000L, "仓位数量");
+            helper.assertValueEqual(position.lots(), 100L, "仓位数量");
             helper.assertValueEqual(position.leverage(), 10, "杠杆");
             PlayerTrade opened = last(ServerTrading.book().trades(id));
             helper.assertTrue(ServerTrading.poolBalance().equals(poolBefore.plus(opened.fee())), "手续费归流动性池");
@@ -165,7 +168,7 @@ final class TradingGameTests {
             helper.assertValueEqual(account.assets().walletBalance(), ServerAccounts.balance(id).plus(position.margin()),
                     "钱包余额含保证金");
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, 1000, 0));
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, 100, 0));
 
             helper.assertTrue(ServerTrading.book().position(id, DIAMOND).isEmpty(), "全部平仓后没有仓位");
             PlayerTrade closed = last(ServerTrading.book().trades(id));
@@ -179,7 +182,7 @@ final class TradingGameTests {
         helper.succeed();
     }
 
-    /** 开空成交价低于最新价格半个点差；部分平仓只减仓位、不改开仓均价；火药的数量精度是 0 位。 */
+    /** 开空成交价沿买盘逐档变差，低于买一价；部分平仓只减仓位、不改开仓均价；火药的数量精度是 0 位。 */
     private static void shortOrderFillsBelowLastPriceAndClosesPartially(GameTestHelper helper) {
         ServerPlayer player = trader(helper, "OrderTrader2", "5000");
         try {
@@ -192,7 +195,10 @@ final class TradingGameTests {
             ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_SHORT, gunpowder, 40, 20));
             Position opened = ServerTrading.book().position(id, gunpowder).orElseThrow();
             helper.assertValueEqual(opened.side(), Side.SHORT, "空头");
-            helper.assertValueEqual(opened.entryPrice(), snapshot.lastPrice() - spec.spread() / 2, "空头成交价 = 最新价格 − 半个点差");
+            // 40 手约 4,000 CRP，吃掉好几档：均价 = 同一条曲线按 40 手算出的卖出均价，低于买一价
+            helper.assertValueEqual(opened.entryPrice(), spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(false, 40),
+                    "空头成交价 = 沿买盘逐档卖出的均价");
+            helper.assertTrue(opened.entryPrice() < snapshot.lastPrice() - spec.spread() / 2, "大单有滑点，比买一价更差");
 
             ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, gunpowder, 15, 0));
             Position remaining = ServerTrading.book().position(id, gunpowder).orElseThrow();
@@ -202,6 +208,34 @@ final class TradingGameTests {
             helper.assertValueEqual(total(id), totalBefore, "总额不变");
         } finally {
             finish(player);
+        }
+        helper.succeed();
+    }
+
+    /** 大单沿虚拟流动性曲线成交（均价比买一价差），成交后最新价格不变，随后另一位玩家的小单仍按买一价成交。 */
+    private static void bigOrderSlipsAlongTheCurveButLeavesThePriceAlone(GameTestHelper helper) {
+        ServerPlayer whale = trader(helper, "OrderWhale", "100000");
+        ServerPlayer minnow = trader(helper, "OrderMinnow", "1000");
+        try {
+            String gunpowder = ServerMarket.symbols().get(1);
+            ContractSpec spec = ServerMarket.spec(gunpowder);
+            MarketSnapshot before = ServerMarket.snapshot(gunpowder);
+            double touch = before.lastPrice() + spec.spread() / 2;
+            double expected = spec.liquidityCurve(before.lastPrice()).averageFillPrice(true, 600);
+
+            // 600 个火药，名义价值约 60,000 CRP，是参考单（10,000 CRP）的 6 倍
+            ServerTrading.handleOrder(whale, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, 600, 20));
+            Position big = ServerTrading.book().position(whale.getUUID(), gunpowder).orElseThrow();
+            helper.assertValueEqual(big.entryPrice(), expected, "大单成交价 = 曲线按 600 手算出的均价");
+            helper.assertTrue(big.entryPrice() > touch * (1 + 0.003), "大单滑点明显：" + big.entryPrice() + " vs " + touch);
+
+            helper.assertValueEqual(ServerMarket.snapshot(gunpowder).lastPrice(), before.lastPrice(), "成交后最新价格不变");
+            ServerTrading.handleOrder(minnow, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, 1, 5));
+            helper.assertValueEqual(ServerTrading.book().position(minnow.getUUID(), gunpowder).orElseThrow().entryPrice(), touch,
+                    "别人的大单不影响这位玩家：仍按买一价成交");
+        } finally {
+            finish(whale);
+            finish(minnow);
         }
         helper.succeed();
     }
@@ -333,7 +367,7 @@ final class TradingGameTests {
         helper.succeed();
     }
 
-    /** 配置里写了点差、最高杠杆、数量精度就按写的算；没写的用默认值（点差为起始价格的 0.05%，20 倍，3 位）。 */
+    /** 配置里写了点差、最高杠杆、数量精度、流动性深度就按写的算；没写的用默认值（点差为起始价格的 0.05%，20 倍，3 位，滑点 0.1%）。 */
     private static void contractConfigReadsTradingParameters(GameTestHelper helper) throws IOException {
         Path directory = Files.createTempDirectory("creepercapital-trading-config");
         try {
@@ -355,7 +389,8 @@ final class TradingGameTests {
                           },
                           "spread": 0.4,
                           "max_leverage": 75,
-                          "quantity_decimals": 2
+                          "quantity_decimals": 2,
+                          "depth_slippage": 0.002
                         },
                         {
                           "symbol": "PLAINCRP",
@@ -376,13 +411,15 @@ final class TradingGameTests {
 
             List<ContractSpec> loaded = ContractConfig.load(file);
 
-            helper.assertValueEqual(loaded.get(0).trading(), new TradingParams("CUSTOMCRP", 0.4, 75, 2), "配置里写的交易参数");
-            helper.assertValueEqual(loaded.get(1).trading(), new TradingParams("PLAINCRP", 0.04, 20, 3), "没写的用默认值");
+            helper.assertValueEqual(loaded.get(0).trading(), new TradingParams("CUSTOMCRP", 0.4, 75, 2, 0.002), "配置里写的交易参数");
+            helper.assertValueEqual(loaded.get(1).trading(), new TradingParams("PLAINCRP", 0.04, 20, 3, 0.001), "没写的用默认值");
             helper.assertValueEqual(ContractConfig.load(file).get(0), loaded.get(0), "再读一遍结果一致");
             Path generated = directory.resolve("generated.json");
             ContractConfig.load(generated);
             helper.assertTrue(Files.readString(generated, StandardCharsets.UTF_8).contains("\"max_leverage\": 125"),
                     "自动生成的配置文件里带着交易参数，方便调整");
+            helper.assertTrue(Files.readString(generated, StandardCharsets.UTF_8).contains("\"depth_slippage\": 0.003"),
+                    "自动生成的配置文件里带着流动性深度");
         } finally {
             deleteRecursively(directory);
         }

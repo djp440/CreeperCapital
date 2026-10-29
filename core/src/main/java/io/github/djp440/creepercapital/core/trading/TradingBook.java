@@ -131,7 +131,7 @@ public final class TradingBook {
         if (existing != null && existing.leverage() != leverage) {
             return TradeResult.reject(TradeResult.Reason.LEVERAGE_MISMATCH, String.valueOf(existing.leverage()));
         }
-        double price = fillPrice(spec, snapshot, side);
+        double price = fillPrice(spec, snapshot, side, lots);
         if (!(price > 0)) {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
@@ -184,7 +184,7 @@ public final class TradingBook {
         if (lots > position.lots()) {
             return TradeResult.reject(TradeResult.Reason.CLOSE_EXCEEDS_POSITION, String.valueOf(position.lots()));
         }
-        double price = fillPrice(spec, snapshot, position.side(), TradeKind.CLOSE);
+        double price = fillPrice(spec, snapshot, position.side(), TradeKind.CLOSE, lots);
         if (!(price > 0)) {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
@@ -245,15 +245,24 @@ public final class TradingBook {
                 existing.margin().plus(margin), existing.quantityDecimals());
     }
 
-    /** 市价成交价：买入（开多、平空）在最新价格上加半个点差，卖出（开空、平多）减半个点差。 */
-    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind) {
+    /**
+     * 市价成交价：<b>全模组唯一的成交价入口</b>。成交价是 {@code lots} 手沿虚拟流动性曲线（{@link io.github.djp440.creepercapital.core.market.LiquidityCurve}）
+     * 逐档吃单的均价：买入（开多、平空）从卖一价（最新价格 + 半个点差）起越吃越贵，卖出（开空、平多）从买一价起越吃越便宜；
+     * 这是临时冲击，不改变最新价格，其他玩家看到的价格不受影响。
+     * <p>
+     * 市价开平仓用它；限价委托中按市价成交（taker）的部分、止盈止损触发后的市价成交也必须调用它，不得另算成交价，
+     * 否则那部分订单会绕过滑点。
+     *
+     * @return 成交均价；数量大到算不出有限的正价格时返回 NaN，调用方按 {@link TradeResult.Reason#INVALID_PRICE} 拒单
+     */
+    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, long lots) {
         boolean buy = (side == Side.LONG) == (kind == TradeKind.OPEN);
-        double half = spec.spread() / 2;
-        return buy ? snapshot.lastPrice() + half : snapshot.lastPrice() - half;
+        double price = spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(buy, lots);
+        return Double.isFinite(price) && price > 0 ? price : Double.NaN;
     }
 
-    private static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side) {
-        return fillPrice(spec, snapshot, side, TradeKind.OPEN);
+    private static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, long lots) {
+        return fillPrice(spec, snapshot, side, TradeKind.OPEN, lots);
     }
 
     /** 名义价值 = 价格 × 数量，取整到最小金额单位。 */

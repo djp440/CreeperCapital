@@ -18,7 +18,8 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图、右侧的下单面板（{@link OrderPanel}）和底部表格区（资产、仓位、成交历史三页）。
+ * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图、图表右侧的盘口栏（{@link MarketColumn}）、最右侧的下单面板（{@link OrderPanel}）
+ * 和底部表格区（资产、仓位、成交历史三页）。
  * <p>
  * 行情栏左侧是当前合约的交易代码，市场里有多个合约时带下拉箭头，点开列表可以切换合约（各合约的行情、K 线互相独立）；
  * 其后依次是最新价格、标记价格、指数价格、资金费率与结算倒计时、市场时间，以及 24h 涨跌、最高、最低、成交量；
@@ -63,6 +64,7 @@ public final class TradingScreen extends Screen {
     }
 
     private final KlineChart chart;
+    private final MarketColumn marketColumn;
     private final OrderPanel orderPanel;
     private final TradeTables tables;
     private TableTab tableTab = TableTab.ASSETS;
@@ -79,6 +81,7 @@ public final class TradingScreen extends Screen {
     private TradingScreen() {
         super(Component.translatable("screen.creepercapital.trading.title"));
         this.chart = new KlineChart(Minecraft.getInstance().font);
+        this.marketColumn = new MarketColumn(Minecraft.getInstance().font);
         this.orderPanel = new OrderPanel(Minecraft.getInstance().font);
         this.tables = new TradeTables(Minecraft.getInstance().font);
     }
@@ -148,6 +151,9 @@ public final class TradingScreen extends Screen {
             String symbol = ClientMarket.selectedSymbol().orElse(null);
             if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
                 orderPanel.quantityBox().setFocused(false);
+                return true;
+            }
+            if (marketColumn.mouseClicked(event.x(), event.y())) {
                 return true;
             }
             if (clickedTableControls(event.x(), event.y())) {
@@ -251,7 +257,11 @@ public final class TradingScreen extends Screen {
         tabsTop = tickerBottom + 5;
         extractTabs(graphics, mouseX, mouseY);
         int panelLeft = width - PADDING - OrderPanel.WIDTH;
-        extractChart(graphics, tabsTop + TAB_HEIGHT + 4, panelLeft - PANEL_GAP, mouseX, mouseY);
+        int columnRight = panelLeft - PANEL_GAP;
+        int columnLeft = columnRight - MarketColumn.WIDTH;
+        extractChart(graphics, tabsTop + TAB_HEIGHT + 4, columnLeft - PANEL_GAP, mouseX, mouseY);
+        marketColumn.extract(graphics, columnLeft, tabsTop, columnRight, height - TABLE_HEIGHT - 4, snapshot.symbol(), snapshot,
+                mouseX, mouseY);
         orderPanel.extract(graphics, panelLeft, tabsTop, width - PADDING, height - TABLE_HEIGHT - 4, snapshot.symbol(), snapshot,
                 mouseX, mouseY, partialTick);
         extractTable(graphics, mouseX, mouseY);
@@ -485,7 +495,8 @@ public final class TradingScreen extends Screen {
                 width / 2, centeredTextY(HEADER_HEIGHT, height), BinancePalette.TEXT_SECONDARY);
     }
 
-    private static int lastPriceColor() {
+    /** 最新价格相对上一个行情步的涨跌色；行情栏和盘口中间的最新价格共用。 */
+    static int lastPriceColor() {
         return switch (ClientMarket.lastPriceDirection()) {
             case UP -> BinancePalette.UP;
             case DOWN -> BinancePalette.DOWN;
