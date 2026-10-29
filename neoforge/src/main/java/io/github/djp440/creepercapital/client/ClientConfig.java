@@ -3,7 +3,7 @@ package io.github.djp440.creepercapital.client;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
- * 客户端配置（{@code config/creepercapital-client.toml}）：涨跌色方案、图表类型，以及交易界面拖拽出来的区域比例。
+ * 客户端配置（{@code config/creepercapital-client.toml}）：涨跌色方案、图表类型、图表指标设置，以及交易界面拖拽出来的区域比例。
  * 涨跌色可以在模组列表的「配置」里改，也可以点交易界面行情栏右端的切换按钮；两处改的是同一个配置项，改完立即生效。
  * 区域比例由交易界面里拖拽边框写入，「恢复默认布局」把它们清零；配置里 0 表示用缺省尺寸。
  */
@@ -11,6 +11,7 @@ public final class ClientConfig {
     public static final ModConfigSpec SPEC;
     private static final ModConfigSpec.EnumValue<ColorScheme> COLOR_SCHEME;
     private static final ModConfigSpec.EnumValue<ChartType> CHART_TYPE;
+    private static final ModConfigSpec.ConfigValue<String> INDICATORS;
     private static final ModConfigSpec.DoubleValue LAYOUT_ORDER_PANEL;
     private static final ModConfigSpec.DoubleValue LAYOUT_COLUMN;
     private static final ModConfigSpec.DoubleValue LAYOUT_TABLE;
@@ -23,6 +24,9 @@ public final class ClientConfig {
         CHART_TYPE = builder
                 .comment("Chart type: CANDLES = candlesticks (default), LINE = close-price line with area fill")
                 .defineEnum("chartType", ChartType.CANDLES);
+        INDICATORS = builder
+                .comment("Chart indicators, edited via the gear next to the chart legend: ma=<period>:<color index>:<visible 0|1>,... (up to 5 lines, period 1-500);volume=<0|1>")
+                .define("indicators", IndicatorSettings.defaults().encode());
         LAYOUT_ORDER_PANEL = builder
                 .comment("Trading screen: order panel width as a fraction of the screen width. 0 = default size. Set by dragging the borders.")
                 .defineInRange("layoutOrderPanelRatio", 0.0, 0.0, 1.0);
@@ -64,6 +68,36 @@ public final class ClientConfig {
         }
         CHART_TYPE.set(type);
         SPEC.save();
+    }
+
+    private static String indicatorsRaw;
+    private static IndicatorSettings indicatorsDecoded = IndicatorSettings.defaults();
+
+    /** 当前的指标设置（均线周期 / 颜色 / 显示状态、成交量副图显示）；配置还没加载时用缺省。每帧都会取，所以按配置字符串缓存解码结果。 */
+    static IndicatorSettings indicators() {
+        if (!SPEC.isLoaded()) {
+            return IndicatorSettings.defaults();
+        }
+        String raw = INDICATORS.get();
+        if (!raw.equals(indicatorsRaw)) {
+            indicatorsDecoded = IndicatorSettings.decode(raw);
+            indicatorsRaw = raw;
+        }
+        return indicatorsDecoded;
+    }
+
+    /** 保存指标设置并写回配置文件；图表下一帧起按新设置重算。 */
+    static void setIndicators(IndicatorSettings settings) {
+        if (!SPEC.isLoaded()) {
+            return;
+        }
+        INDICATORS.set(settings.encode());
+        SPEC.save();
+    }
+
+    /** 开发用（自动截图）：用配置字符串（{@link IndicatorSettings#encode()} 的格式）设置指标，等同于玩家在浮层里改完。 */
+    public static void setIndicatorsRaw(String encoded) {
+        setIndicators(IndicatorSettings.decode(encoded));
     }
 
     /** 玩家拖拽出来的区域比例；配置还没加载时用缺省布局。 */

@@ -171,6 +171,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面并展开图表的指标设置浮层，可同时展开某一行的色盘、在某一行输入框里填一段文字。 */
+    public static void openWithIndicatorSettings(int paletteRow, int typedRow, String typedText) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devOpenSettings(paletteRow, typedRow, typedText);
+        }
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();
@@ -187,6 +195,8 @@ public final class TradingScreen extends Screen {
         addWidget(orderPanel.priceBox());
         addWidget(orderPanel.takeProfitBox());
         addWidget(orderPanel.stopLossBox());
+        // 图表指标设置浮层里的周期输入框：同样由浮层自己渲染
+        chart.inputs().forEach(this::addWidget);
     }
 
     /** 单人游戏里打开交易界面不暂停游戏，市场照常推进。 */
@@ -202,8 +212,13 @@ public final class TradingScreen extends Screen {
             contractMenuOpen = false;
             return true;
         }
-        if (orderPanel.anyInputFocused() && event.key() != GLFW.GLFW_KEY_ESCAPE) {
-            // 在数量 / 委托价 / 止盈止损价输入框里打字时，快捷键字母不能关掉界面
+        if (chart.settingsOpen() && event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            chart.closeSettings();
+            setFocused(null);
+            return true;
+        }
+        if ((orderPanel.anyInputFocused() || chart.anyInputFocused()) && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+            // 在数量 / 委托价 / 止盈止损价 / 均线周期输入框里打字时，快捷键字母不能关掉界面
             return super.keyPressed(event);
         }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
@@ -238,6 +253,13 @@ public final class TradingScreen extends Screen {
                 dragRatios = layoutRatios();
                 return true;
             }
+        }
+        EditBox chartInput = chart.mouseClickedInput(event, doubleClick);
+        if (chartInput != null) {
+            setFocused(null);
+            setFocused(chartInput);
+            setDragging(true);
+            return true;
         }
         if (chart.mouseClicked(event.x(), event.y(), event.button(), doubleClick)) {
             clearInputFocus();
@@ -306,6 +328,7 @@ public final class TradingScreen extends Screen {
     /** 清掉所有输入框的焦点，同时清掉界面自己记的焦点子部件，两边保持一致。 */
     private void clearInputFocus() {
         orderPanel.unfocusInputs();
+        chart.unfocusInputs();
         setFocused(null);
     }
 
@@ -367,7 +390,7 @@ public final class TradingScreen extends Screen {
         layout = TradingLayout.compute(width, height, tickerRows, layoutRatios());
         extractHeader(graphics, mouseX, mouseY);
         extractTicker(graphics, snapshot, ticker, mouseX, mouseY);
-        extractChartCard(graphics, snapshot, mouseX, mouseY);
+        extractChartCard(graphics, snapshot, mouseX, mouseY, partialTick);
         if (layout.columnMode() == TradingLayout.ColumnMode.SIDE) {
             TradingLayout.Rect column = layout.marketColumn();
             graphics.enableScissor(column.left(), column.top(), column.right(), column.bottom());
@@ -580,7 +603,7 @@ public final class TradingScreen extends Screen {
      * 图表卡片：顶部页签行（K 线周期；盘口栏并进来时前面还有 K 线 / 盘口 / 最新成交三页，一行放不下就把周期挪到第二行），
      * 下面是 K 线图或盘口栏的当前页。
      */
-    private void extractChartCard(GuiGraphicsExtractor graphics, MarketSnapshot snapshot, int mouseX, int mouseY) {
+    private void extractChartCard(GuiGraphicsExtractor graphics, MarketSnapshot snapshot, int mouseX, int mouseY, float partialTick) {
         TradingLayout.Rect card = layout.chart();
         graphics.fill(card.left(), card.top(), card.right(), card.bottom(), TradingPalette.PANEL);
         graphics.enableScissor(card.left(), card.top(), card.right(), card.bottom());
@@ -643,7 +666,7 @@ public final class TradingScreen extends Screen {
                         (card.left() + card.right()) / 2, GuiText.centeredY(font, contentTop, card.bottom()), TradingPalette.TEXT_SECONDARY);
             } else {
                 chart.extract(graphics, card.left() + 6, contentTop + 3, card.right() - 4, card.bottom() - 2, ClientKlines.selected(),
-                        candles, mouseX, mouseY);
+                        candles, mouseX, mouseY, partialTick);
             }
         } else {
             chart.forget();

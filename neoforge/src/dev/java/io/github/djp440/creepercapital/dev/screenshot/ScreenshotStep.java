@@ -55,7 +55,11 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，图表缺省缩放、往回看 150 根。 */
         CHART_PANNED(minecraft -> TradingScreen.openWithChartView(7, 150, 0)),
         /** 交易界面，图表拖到缓存里最旧一根（往回看一个很大的数，被夹到边界），显示到头反馈。 */
-        CHART_AT_OLDEST(minecraft -> TradingScreen.openWithChartView(7, 1_000_000, 1));
+        CHART_AT_OLDEST(minecraft -> TradingScreen.openWithChartView(7, 1_000_000, 1)),
+        /** 交易界面，图表的指标设置浮层展开，第 2 行（MA 25）的色盘展开。 */
+        INDICATOR_SETTINGS(minecraft -> TradingScreen.openWithIndicatorSettings(1, -1, null)),
+        /** 交易界面，图表的指标设置浮层展开，第 1 行周期输入框里是不合法的 0（显示错误提示）。 */
+        INDICATOR_SETTINGS_INVALID(minecraft -> TradingScreen.openWithIndicatorSettings(-1, 0, "0"));
 
         private final Consumer<Minecraft> opener;
 

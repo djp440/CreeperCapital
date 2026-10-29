@@ -22,7 +22,7 @@ import net.neoforged.neoforge.common.NeoForge;
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
  * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
- * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）。
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -366,7 +366,39 @@ final class ScreenshotScript {
                     "涨跌色回到绿涨红跌、图表类型切回 K 线：图表工具区「K线」为黄字加下划线，图表区重新是蜡烛图；"
                             + "周期仍是 1h，图表立即显示（没有「加载中」闪现——切换类型复用已缓存的 K 线，不重新请求历史）。",
                     View.TRADING,
-                    both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.CANDLES))));
+                    both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.CANDLES))),
+            new ScreenshotStep("52", "指标全部隐藏（#34，3 级验收）",
+                    "1h 周期；图例第二行里齿轮之后的 MA(7) / MA(25) / MA(99) 与「成交量」四项都变灰（只剩名称，没有数值）；"
+                            + "图表上没有任何均线，成交量副图消失，主图向下延伸占满原来成交量的位置；价格轴范围只贴着蜡烛本身（不再被均线拉大）；"
+                            + "第一行 O/H/L/C 照常；时间轴、最新价格标签正常。",
+                    View.TRADING,
+                    both(both(select(CandlePeriod.H1), indicators("ma=7:0:0,25:1:0,99:2:0;volume=0")), scheme(ColorScheme.GREEN_UP))),
+            new ScreenshotStep("53", "指标部分隐藏（#34，3 级验收）",
+                    "只隐藏 MA(25)：图例里 MA(25) 变灰（无数值）、MA(7) 黄、MA(99) 蓝仍带数值，成交量项正常（带数值）；"
+                            + "图上只有黄、蓝两条均线，粉色那条没有；成交量柱仍在；价格轴范围只受显示着的均线影响。",
+                    View.TRADING,
+                    indicators("ma=7:0:1,25:1:0,99:2:1;volume=1")),
+            new ScreenshotStep("54", "自定义指标参数后的图表（#38，3 级验收）",
+                    "五条自定义均线：MA(5) 青、MA(20) 橙、MA(60) 紫、MA(120) 白、MA(200) 粉；图例第二行齿轮之后依次排这五项和「成交量」，"
+                            + "放不下的项整项省掉、不越出图表（默认窗口宽度下只排得下前三项，被省掉的项仍可在设置浮层里切换，见 55）；"
+                            + "图上五条均线按各自周期重新计算，周期越长越平缓、越滞后；周期大于已有 K 线根数的均线没有值；颜色与图例一致；价格轴范围受这些显示着的均线影响。",
+                    View.TRADING,
+                    indicators("ma=5:3:1,20:4:1,60:5:1,120:6:1,200:7:1;volume=1")),
+            new ScreenshotStep("55", "指标设置浮层，色盘展开（#38，3 级验收）",
+                    "点齿轮后在图表左上角弹出的浮层（盖在图例与主图左上方，不是另开界面）：标题行是黄色齿轮 + 「指标设置」，右端是灰按钮「恢复默认」和 ×；"
+                            + "其下五行，每行从左到右是黄色复选框（已选中）、颜色块、「MA」、周期输入框（显示 5 / 20 / 60 / 120 / 200）、「根 K 线」和红色 ×（删除）；"
+                            + "第 2 行（MA 20）的颜色块带白框、下方展开一排八色色盘，当前色（橙）带白框；再下面一行是成交量的复选框 + 「成交量」；底部是灰按钮「最多 5 条」（已满，灰字）；"
+                            + "浮层整体不越出图表卡片，文字清晰；浮层后面的图例被盖住、均线仍在。",
+                    View.INDICATOR_SETTINGS),
+            new ScreenshotStep("56", "指标设置：周期输入不合法的提示（#38，3 级验收）",
+                    "浮层展开，第一行周期输入框带红色边框、里面是 0 和光标，成交量行下方有红字提示「周期需为 1~500 的整数」；"
+                            + "均线周期保持原值（图例里仍是 MA(5)），底部按钮在提示下面，整体不越出图表。",
+                    View.INDICATOR_SETTINGS_INVALID),
+            new ScreenshotStep("57", "恢复默认指标（#34 / #38，3 级验收）",
+                    "相当于点了「恢复默认」：回到 MA(7) 黄 / MA(25) 粉 / MA(99) 蓝三条均线与成交量全部显示，浮层已收起；"
+                            + "客户端配置里的 indicators 回到缺省（下一次启动不受截图影响）。",
+                    View.TRADING,
+                    indicators("ma=7:0:1,25:1:1,99:2:1;volume=1")));
 
     private ScreenshotScript() {
     }
@@ -379,6 +411,11 @@ final class ScreenshotScript {
     /** 切换图表类型（写进客户端配置，与交易界面上的页签、模组配置界面改的是同一项）。 */
     private static Consumer<Minecraft> chartType(ChartType type) {
         return minecraft -> ClientConfig.setChartType(type);
+    }
+
+    /** 设置图表指标（配置字符串格式见 ClientConfig；与交易界面图例旁的齿轮浮层改的是同一项配置）。 */
+    private static Consumer<Minecraft> indicators(String encoded) {
+        return minecraft -> ClientConfig.setIndicatorsRaw(encoded);
     }
 
     /** 设置交易界面的区域比例（等同于玩家拖拽边框后松手，写进客户端配置）；全 0 即缺省布局。 */
