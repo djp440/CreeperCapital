@@ -20,6 +20,8 @@ import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
+import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderEvent;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
@@ -126,6 +128,9 @@ public final class ServerTrading {
         }
         ContractSpec spec = ServerMarket.spec(order.symbol());
         UUID id = player.getUUID();
+        if (order.action().isMarginSetting()) {
+            return executeMargin(player, spec, order);
+        }
         TradeResult result = submit(id, spec, order);
         // 玩家平仓可能让附带的止盈止损失效，记录下来（离线汇总在 #19 接）
         logEvents(book().orders().takeEvents());
@@ -157,6 +162,28 @@ public final class ServerTrading {
         return filled(trade, spec);
     }
 
+    /** 切换保证金模式或调整杠杆；回报的文案键见 lang 里的 {@code message.creepercapital.order.set_*}。 */
+    private static OrderResultPayload executeMargin(ServerPlayer player, ContractSpec spec, OrderPayload order) {
+        UUID id = player.getUUID();
+        MarginResult result = switch (order.action()) {
+            case SET_CROSS -> book().setMarginMode(id, spec.symbol(), MarginMode.CROSS);
+            case SET_ISOLATED -> book().setMarginMode(id, spec.symbol(), MarginMode.ISOLATED);
+            default -> book().adjustLeverage(id, spec, ServerTrading::markPrice, order.leverage());
+        };
+        if (result instanceof MarginResult.Rejected rejected) {
+            LOGGER.debug("拒绝 {} 的保证金设置 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(),
+                    rejected.args());
+            return rejected(rejected.reason().name().toLowerCase(Locale.ROOT), rejected.args().toArray(String[]::new));
+        }
+        LOGGER.info("玩家保证金设置 {} {} {} 杠杆 {}", player.getGameProfile().name(), order.action(), spec.symbol(),
+                order.leverage());
+        return switch (order.action()) {
+            case SET_CROSS -> new OrderResultPayload(true, "set_cross", List.of(spec.symbol()));
+            case SET_ISOLATED -> new OrderResultPayload(true, "set_isolated", List.of(spec.symbol()));
+            default -> new OrderResultPayload(true, "set_leverage", List.of(spec.symbol(), String.valueOf(order.leverage())));
+        };
+    }
+
     private static TradeResult submit(UUID id, ContractSpec spec, OrderPayload order) {
         MarketSnapshot snapshot = ServerMarket.snapshot(order.symbol());
         Side side = order.action() == OrderPayload.Action.OPEN_SHORT ? Side.SHORT : Side.LONG;
@@ -173,14 +200,15 @@ public final class ServerTrading {
         return switch (action) {
             case OPEN_LONG, OPEN_SHORT -> limit
                     ? book().orders().placeLimit(id, spec, snapshot, side, order.lots(), order.leverage(), order.price(),
-                            order.protection())
+                            order.protection(), ServerTrading::markPrice)
                     : book().orders().openWithProtection(id, spec, snapshot, side, order.lots(), order.leverage(),
-                            order.protection());
+                            order.protection(), ServerTrading::markPrice);
             case CLOSE -> limit
                     ? book().orders().placeReduceOnlyLimit(id, spec, snapshot, order.lots(), order.price())
                     : order.reduceOnly() ? book().closeUpTo(id, spec, snapshot, order.lots())
                             : book().close(id, spec, snapshot, order.lots());
             case PROTECT -> book().orders().placeProtection(id, spec, snapshot, order.lots(), order.protection());
+            default -> throw new IllegalStateException("不是成交动作：" + order.action());
         };
     }
 
@@ -309,8 +337,10 @@ public final class ServerTrading {
         List<Order> orders = new ArrayList<>(book().orders().open(player.getUUID()));
         orders.addAll(book().orders().history(player.getUUID()));
         orders.sort(Comparator.comparingLong(Order::id));
+        List<String> cross = ServerMarket.symbols().stream()
+                .filter(symbol -> book().marginMode(player.getUUID(), symbol) == MarginMode.CROSS).toList();
         ModPayloads.sendTo(player,
-                new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, orders));
+                new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, orders, cross));
     }
 
     private static void markDirty() {
@@ -322,6 +352,9 @@ public final class ServerTrading {
     private static void onServerStarting(ServerStartingEvent event) {
         data = event.getServer().getDataStorage().computeIfAbsent(TradingSavedData.TYPE);
         book = data.bind(ServerAccounts.book());
+        // 成交的源头：开平仓以及以后的强平、限价成交都经过这里，全服「最新成交」广播不挂在某个下单入口上
+        MinecraftServer server = event.getServer();
+        book.addTradeListener(trade -> ServerLatestTrades.onPlayerTrade(server, trade));
         LOGGER.info("交易账：流动性池 {} CRP，最近一笔玩家成交编号 {}", book.pool().balance().toDisplayString(),
                 book.state().lastTradeId());
     }

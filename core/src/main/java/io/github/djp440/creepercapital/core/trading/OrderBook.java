@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.ToDoubleFunction;
 
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
@@ -128,6 +129,12 @@ public final class OrderBook {
      */
     public TradeResult placeLimit(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots,
             int leverage, double price, Protection protection) {
+        return placeLimit(player, spec, snapshot, side, lots, leverage, price, protection, onlyThisContract(snapshot));
+    }
+
+    /** 同 {@link #placeLimit(UUID, ContractSpec, MarketSnapshot, Side, long, int, double, Protection)}，下单即成交时可用余额按各合约的标记价格算。 */
+    public TradeResult placeLimit(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots,
+            int leverage, double price, Protection protection, ToDoubleFunction<String> markPrice) {
         TradeResult invalid = book.validateOpen(player, spec, side, lots, leverage);
         if (invalid != null) {
             return invalid;
@@ -148,7 +155,7 @@ public final class OrderBook {
             if (full != null) {
                 return full;
             }
-            TradeResult result = book.open(player, spec, snapshot, side, lots, leverage);
+            TradeResult result = book.open(player, spec, snapshot, side, lots, leverage, markPrice);
             if (result instanceof TradeResult.Filled filled) {
                 PlayerTrade trade = filled.trade();
                 remember(new Order(++lastOrderId, player, spec.symbol(), side, OrderType.LIMIT, price, lots, leverage,
@@ -181,11 +188,22 @@ public final class OrderBook {
         return new TradeResult.Placed(order);
     }
 
+    /** 只知道这一个合约的行情：其他合约的全仓仓位按开仓均价算（盈亏为 0）。 */
+    private static ToDoubleFunction<String> onlyThisContract(MarketSnapshot snapshot) {
+        return symbol -> symbol.equals(snapshot.symbol()) ? snapshot.markPrice() : Double.NaN;
+    }
+
     /** 市价开仓并附带止盈止损：随开仓一起生效（数量 = 开仓数量）。附带的触发价不合法时整笔不成交、账不变。 */
     public TradeResult openWithProtection(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots,
             int leverage, Protection protection) {
+        return openWithProtection(player, spec, snapshot, side, lots, leverage, protection, onlyThisContract(snapshot));
+    }
+
+    /** 同 {@link #openWithProtection(UUID, ContractSpec, MarketSnapshot, Side, long, int, Protection)}，可用余额按各合约的标记价格算（全仓浮亏占用可用余额）。 */
+    public TradeResult openWithProtection(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots,
+            int leverage, Protection protection, ToDoubleFunction<String> markPrice) {
         if (protection.isEmpty()) {
-            return book.open(player, spec, snapshot, side, lots, leverage);
+            return book.open(player, spec, snapshot, side, lots, leverage, markPrice);
         }
         TradeResult invalid = book.validateOpen(player, spec, side, lots, leverage);
         if (invalid != null) {
@@ -199,7 +217,7 @@ public final class OrderBook {
         if (full != null) {
             return full;
         }
-        TradeResult result = book.open(player, spec, snapshot, side, lots, leverage);
+        TradeResult result = book.open(player, spec, snapshot, side, lots, leverage, markPrice);
         if (result instanceof TradeResult.Filled) {
             attach(player, spec.symbol(), side, lots, protection, snapshot.time().totalSeconds());
         }

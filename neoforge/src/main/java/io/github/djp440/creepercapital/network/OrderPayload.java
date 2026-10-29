@@ -9,8 +9,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 /**
- * 客户端 → 服务端：玩家的委托意图（开多、开空、平仓、给仓位设止盈止损；市价或限价）。服务端校验一切，不信任客户端；
- * 平仓、设止盈止损时杠杆字段被忽略，市价单时价格字段被忽略。
+ * 客户端 → 服务端：玩家的委托意图（开多、开空、平仓、给仓位设止盈止损；市价或限价），以及切换保证金模式、调整杠杆。服务端校验一切，不信任客户端；
+ * 平仓、设止盈止损时杠杆字段被忽略，市价单时价格字段被忽略；保证金设置（SET_*）只看合约，调杠杆时只看杠杆字段。
  * <p>
  * 止盈止损：开仓（市价、限价）时附带，随开仓一起生效；{@link Action#PROTECT} 是给已有仓位补设。
  * 只减仓：开多 / 开空带只减仓是“买入 / 卖出缩减反向仓位”，没有可缩减的仓位服务端拒绝；平仓永远是只减仓，限价平仓就是只减仓限价单。
@@ -36,7 +36,18 @@ public record OrderPayload(Action action, String symbol, long lots, int leverage
         OPEN_SHORT,
         CLOSE,
         /** 给已有仓位设止盈止损（固定数量 lots，触发时按仓位缩减）。 */
-        PROTECT
+        PROTECT,
+        /** 把这个合约的保证金模式设为全仓（{@code lots} 与 {@code leverage} 被忽略）。 */
+        SET_CROSS,
+        /** 把这个合约的保证金模式设为逐仓（{@code lots} 与 {@code leverage} 被忽略）。 */
+        SET_ISOLATED,
+        /** 把已有仓位的杠杆调成 {@code leverage}（{@code lots} 被忽略）。 */
+        SET_LEVERAGE;
+
+        /** 是保证金设置（切换模式、调杠杆）而不是成交。 */
+        public boolean isMarginSetting() {
+            return this == SET_CROSS || this == SET_ISOLATED || this == SET_LEVERAGE;
+        }
     }
 
     /** 委托的执行方式：市价立即成交，限价挂在服务端等价格穿越。 */

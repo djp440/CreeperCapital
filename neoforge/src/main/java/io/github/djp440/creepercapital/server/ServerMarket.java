@@ -20,6 +20,7 @@ import io.github.djp440.creepercapital.core.market.JumpEvent;
 import io.github.djp440.creepercapital.core.market.Market;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketState;
+import io.github.djp440.creepercapital.core.market.MarketTrade;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.ModPayloads;
@@ -286,7 +287,13 @@ public final class ServerMarket {
                 ModPayloads.sendTo(player, payload);
             }
         }
+        ServerLatestTrades.onMarketStep(server, snapshots);
         ServerTrading.onMarketStep(server, snapshots);
+    }
+
+    /** 某个行情步的模拟成交（只展示用，不碰行情的随机数流，见 {@link Market#simulatedTrades}）。 */
+    static List<MarketTrade> simulatedTrades(MarketSnapshot snapshot, double previousLastPrice) {
+        return market().simulatedTrades(snapshot, previousLastPrice);
     }
 
     private static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {

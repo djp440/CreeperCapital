@@ -96,6 +96,15 @@ public final class Market {
         return new MarketState(seed, step, ticksIntoStep, paused, states);
     }
 
+    /**
+     * 某个合约某个行情步的模拟成交（只展示用，见 {@link SimulatedTrades}）；无状态，不改变行情，可对同一步重复调用。
+     *
+     * @param previousLastPrice 上一个行情步的最新价格，未知时传 NaN
+     */
+    public List<MarketTrade> simulatedTrades(MarketSnapshot snapshot, double previousLastPrice) {
+        return SimulatedTrades.of(seed, spec(snapshot.symbol()), snapshot, previousLastPrice);
+    }
+
     /** 订阅跳跃事件（随机的和手动的），新闻文字从这里挂接。 */
     public void addJumpListener(JumpListener listener) {
         jumpListeners.add(listener);

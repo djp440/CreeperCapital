@@ -17,6 +17,7 @@ import io.github.djp440.creepercapital.CreeperCapital;
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderExtras;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
@@ -43,8 +44,20 @@ public final class TradingSavedData extends SavedData {
     private static final Codec<Side> SIDE = Codec.STRING.xmap(Side::valueOf, Side::name);
     private static final Codec<TradeKind> KIND = Codec.STRING.xmap(TradeKind::valueOf, TradeKind::name);
 
+    private static final Codec<MarginMode> MODE = Codec.STRING.xmap(MarginMode::valueOf, MarginMode::name);
+
     private record OwnedPosition(UUID player, Position position) {
     }
+
+    /** 玩家在某个合约上设置的保证金模式（只存和缺省不同的）。 */
+    private record ModeSetting(UUID player, String symbol, MarginMode mode) {
+    }
+
+    private static final Codec<ModeSetting> MODE_SETTING_CODEC = RecordCodecBuilder.create(i -> i.group(
+            UUIDUtil.CODEC.fieldOf("player").forGetter(ModeSetting::player),
+            Codec.STRING.fieldOf("symbol").forGetter(ModeSetting::symbol),
+            MODE.fieldOf("mode").forGetter(ModeSetting::mode))
+            .apply(i, ModeSetting::new));
 
     private static final Codec<Position> POSITION_CODEC = RecordCodecBuilder.create(i -> i.group(
             Codec.STRING.fieldOf("symbol").forGetter(Position::symbol),
@@ -53,7 +66,9 @@ public final class TradingSavedData extends SavedData {
             Codec.DOUBLE.fieldOf("entry_price").forGetter(Position::entryPrice),
             Codec.INT.fieldOf("leverage").forGetter(Position::leverage),
             MONEY.fieldOf("margin").forGetter(Position::margin),
-            Codec.INT.fieldOf("quantity_decimals").forGetter(Position::quantityDecimals))
+            Codec.INT.fieldOf("quantity_decimals").forGetter(Position::quantityDecimals),
+            // 旧存档（#11 之前）没有这个字段，都是逐仓
+            MODE.optionalFieldOf("margin_mode", MarginMode.ISOLATED).forGetter(Position::mode))
             .apply(i, Position::new));
 
     private static final Codec<OwnedPosition> OWNED_POSITION_CODEC = RecordCodecBuilder.create(i -> i.group(
@@ -109,9 +124,13 @@ public final class TradingSavedData extends SavedData {
             TRADE_CODEC.listOf().fieldOf("trades").forGetter(state -> flattenTrades(state)),
             // 委托是 #14 新增的，旧存档没有这两个字段，缺省为没有委托
             Codec.LONG.optionalFieldOf("last_order_id", 0L).forGetter(TradingState::lastOrderId),
-            ORDER_CODEC.listOf().optionalFieldOf("orders", List.of()).forGetter(state -> flattenOrders(state)))
-            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders) -> new TradingState(pool, lastTradeId,
-                    groupPositions(positions), groupTrades(trades), lastOrderId, groupOrders(orders))));
+            ORDER_CODEC.listOf().optionalFieldOf("orders", List.of()).forGetter(state -> flattenOrders(state)),
+            // 保证金模式是 #11 新增的，旧存档没有这个字段，缺省为全部逐仓
+            MODE_SETTING_CODEC.listOf().optionalFieldOf("margin_modes", List.of())
+                    .forGetter(state -> flattenModes(state)))
+            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes) -> new TradingState(pool,
+                    lastTradeId, groupPositions(positions), groupTrades(trades), lastOrderId, groupOrders(orders),
+                    groupModes(modes))));
 
     public static final Codec<TradingSavedData> CODEC = STATE_CODEC.xmap(TradingSavedData::new, TradingSavedData::state);
 
@@ -146,6 +165,21 @@ public final class TradingSavedData extends SavedData {
         state.trades().values().forEach(flat::addAll);
         flat.sort(Comparator.comparingLong(PlayerTrade::id));
         return flat;
+    }
+
+    private static List<ModeSetting> flattenModes(TradingState state) {
+        List<ModeSetting> flat = new ArrayList<>();
+        state.marginModes().forEach((player, bySymbol) -> bySymbol
+                .forEach((symbol, mode) -> flat.add(new ModeSetting(player, symbol, mode))));
+        return flat;
+    }
+
+    private static Map<UUID, Map<String, MarginMode>> groupModes(List<ModeSetting> flat) {
+        Map<UUID, Map<String, MarginMode>> grouped = new HashMap<>();
+        for (ModeSetting setting : flat) {
+            grouped.computeIfAbsent(setting.player(), p -> new HashMap<>()).put(setting.symbol(), setting.mode());
+        }
+        return grouped;
     }
 
     private static List<Order> flattenOrders(TradingState state) {

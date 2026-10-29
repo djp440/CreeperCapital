@@ -7,8 +7,8 @@ import net.minecraft.network.chat.Component;
 
 /**
  * 图表与下单面板之间的右侧栏（币安的「盘口 / 最新成交」栏）：顶部一排页签，下面是当前页。
- * 目前只有「盘口」页（{@link OrderBookPage}）；「最新成交」页（#18）往 {@link Page} 里追加一个枚举值，
- * 并在 {@link #extract} 的 {@code switch} 里画它即可，页签条、栏宽和点击切换都不用改。
+ * 目前有「盘口」页（{@link OrderBookPage}）和「最新成交」页（{@link LatestTradesPage}）；再加页就往 {@link Page} 里追加一个枚举值，
+ * 并在 {@link #extract} 的 {@code switch} 里画它，页签条、栏宽和点击切换都不用改。
  */
 final class MarketColumn {
     static final int WIDTH = 144;
@@ -17,7 +17,8 @@ final class MarketColumn {
 
     /** 右侧栏的页签。 */
     private enum Page {
-        ORDER_BOOK("screen.creepercapital.trading.sidebar.order_book");
+        ORDER_BOOK("screen.creepercapital.trading.sidebar.order_book"),
+        LATEST_TRADES("screen.creepercapital.trading.sidebar.latest_trades");
 
         private final String key;
 
@@ -32,20 +33,26 @@ final class MarketColumn {
 
     private final Font font;
     private final OrderBookPage orderBook;
+    private final LatestTradesPage latestTrades;
     private Page page = Page.ORDER_BOOK;
     /** 页签条的上沿；每帧渲染时更新，点击判定要用。 */
     private int top;
     private int left;
+    private int right;
+    private int bottom;
 
     MarketColumn(Font font) {
         this.font = font;
         this.orderBook = new OrderBookPage(font);
+        this.latestTrades = new LatestTradesPage(font);
     }
 
     void extract(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, String symbol, MarketSnapshot snapshot,
             int mouseX, int mouseY) {
         this.left = left;
         this.top = top;
+        this.right = right;
+        this.bottom = bottom;
         graphics.fill(left, top, right, bottom, BinancePalette.PANEL);
         graphics.outline(left, top, right - left, bottom - top, BinancePalette.DIVIDER);
 
@@ -68,7 +75,22 @@ final class MarketColumn {
 
         switch (page) {
             case ORDER_BOOK -> orderBook.extract(graphics, left, top + TAB_HEIGHT + 1, right, bottom, symbol, snapshot);
+            case LATEST_TRADES -> latestTrades.extract(graphics, left, top + TAB_HEIGHT + 1, right, bottom, symbol);
         }
+    }
+
+    /** 开发用（自动截图）：切到「最新成交」页。 */
+    void showLatestTrades() {
+        page = Page.LATEST_TRADES;
+    }
+
+    /** 滚轮落在栏内且当前是「最新成交」页时翻动列表；返回是否已处理。 */
+    boolean mouseScrolled(double x, double y, double scrollY) {
+        if (page != Page.LATEST_TRADES || x < left || x >= right || y < top || y >= bottom) {
+            return false;
+        }
+        latestTrades.mouseScrolled(scrollY);
+        return true;
     }
 
     /** 点在页签上切换页；返回是否已处理这次点击。 */
