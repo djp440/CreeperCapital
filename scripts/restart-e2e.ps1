@@ -137,15 +137,18 @@ $snapshotStep = 'step=(\d+),'
 $stepLog = '行情步 (\d+)：'
 $symbols = @('DIAMONDCRP', 'GUNPOWDERCRP')
 
-# 重启后 K 线存储读回的根数必须与市场步数严格对应：1 行情步 = 6 市场秒，所以 1m 共 floor(步数/10)+1 根（含正在走的一根），
-# 1h 共 floor(步数/600)+1 根，1d 共 floor(步数/14400)+1 根。多了说明重复，少了说明有缺口。
+# 重启后 K 线存储读回的根数必须与市场步数严格对应：1 行情步 = 6 市场秒，所以已收盘的 1m 有 floor(步数/10) 根、1h 有 floor(步数/600) 根、
+# 1d 有 floor(步数/14400) 根，再加上正在走的一根；1m、1h 层受保留策略限制（7 个市场日 / 90 个市场日），超出的旧数据被淘汰。
+# 多了说明重复，少了说明有缺口。新世界有 30 个市场日的预生成历史，步数从 431999 起算（见 Market.backfill）。
+$keep1m = 7 * 1440
+$keep1h = 90 * 24
 function Assert-Klines($server, [long]$step, [string]$who) {
     foreach ($symbol in $symbols) {
         $klineLog = "K 线存储 .*（$symbol）：读回 1m (\d+) 根、1h (\d+) 根、1d (\d+) 根"
         $line = Wait-ForLine $server $klineLog 30
         $m = [regex]::Match($line, $klineLog)
-        Assert-True ([long]$m.Groups[1].Value -eq [math]::Floor($step / 10) + 1) "${who}：$symbol 的 1m K 线 $($m.Groups[1].Value) 根，与步数 $step 对应（不缺不重）"
-        Assert-True ([long]$m.Groups[2].Value -eq [math]::Floor($step / 600) + 1) "${who}：$symbol 的 1h K 线 $($m.Groups[2].Value) 根，与步数 $step 对应"
+        Assert-True ([long]$m.Groups[1].Value -eq [math]::Min([math]::Floor($step / 10), $keep1m) + 1) "${who}：$symbol 的 1m K 线 $($m.Groups[1].Value) 根，与步数 $step 对应（不缺不重）"
+        Assert-True ([long]$m.Groups[2].Value -eq [math]::Min([math]::Floor($step / 600), $keep1h) + 1) "${who}：$symbol 的 1h K 线 $($m.Groups[2].Value) 根，与步数 $step 对应"
         Assert-True ([long]$m.Groups[3].Value -eq [math]::Floor($step / 14400) + 1) "${who}：$symbol 的 1d K 线 $($m.Groups[3].Value) 根，与步数 $step 对应"
     }
 }
@@ -155,7 +158,12 @@ try {
     # ---- 第一次启动：行情推进、暂停、停服 ----
     $first = Start-Server '第 1 次' 1
     Wait-ForLine $first '新建市场' $StartupTimeoutSec | Out-Null
-    Wait-ForLine $first '行情步 5：' 60 | Out-Null
+    # 新世界先预生成 30 个市场日的历史（431999 步），再开始实时行情；预生成耗时记录在日志里
+    $backfillLine = Wait-ForLine $first '预生成 30 个市场日的历史' 60
+    Assert-True ($backfillLine -match '耗时 (\d+) ms') "新世界预生成历史：$backfillLine"
+    $firstStepLine = Wait-ForLine $first $stepLog 60
+    $backfilledStep = Get-Step $firstStepLine $stepLog
+    Assert-True ($backfilledStep -eq 432000) "预生成结束于第 431999 步，实时行情从第 $backfilledStep 步接上，没有跳步"
     Send-Command $first 'creeper dev market advance 2000'
     Wait-ForLine $first 'Market advanced|市场已快进' 60 | Out-Null
     Send-Command $first 'creeper dev market pause'
@@ -167,8 +175,7 @@ try {
     $stopLine = Stop-Server $first
     Assert-True ($stopLine -match $snapshotStep) '第 1 次停服时记录了市场步数'
     $savedStep = Get-Step $stopLine $snapshotStep
-    Assert-True ($savedStep -ge 5) "停服前市场已推进到第 $savedStep 步（>= 5）"
-    Assert-True ($savedStep -ge 2005) "快进后市场已推进到第 $savedStep 步（>= 2005）"
+    Assert-True ($savedStep -ge $backfilledStep + 2000) "快进后市场已推进到第 $savedStep 步（>= $($backfilledStep + 2000)）"
     Assert-True ($stopLine -match '暂停=true') '停服时市场处于暂停'
     $klineDir = Join-Path $worldDir 'creepercapital/klines'
     foreach ($symbol in $symbols) {
@@ -186,6 +193,7 @@ try {
     Start-Sleep -Seconds $FrozenWaitSec
     $advanced = @(Drain-Matching $second $stepLog)
     Assert-True ($advanced.Count -eq 0) "暂停期间 $FrozenWaitSec 秒内没有任何行情步"
+    Assert-True (@($second.Seen | Where-Object { $_ -match '预生成 \d+ 个市场日的历史' }).Count -eq 0) '已有世界重启不会重复预生成历史'
 
     Send-Command $second 'creeper dev market resume'
     # 跳跃在行情步推进时触发，日志先于该步的行情日志
@@ -206,6 +214,7 @@ try {
     Assert-True ((Get-Step $restoreLine3 $snapshotStep) -eq $savedStep2) "恢复的步数与第 2 次停服时一致（$savedStep2）"
     Assert-True ($restoreLine3 -match '暂停=false') '未暂停的市场重启后仍在运行'
     Assert-Klines $third $savedStep2 '第 3 次启动'
+    Assert-True (@($third.Seen | Where-Object { $_ -match '预生成 \d+ 个市场日的历史' }).Count -eq 0) '已有世界重启不会重复预生成历史'
     $next3 = Wait-ForLine $third $stepLog 60
     $nextStep3 = Get-Step $next3 $stepLog
     Assert-True ($nextStep3 -eq $savedStep2 + 1) "离线 $OfflineSec 秒后，第一个行情步是 $nextStep3，紧接停服前的第 $savedStep2 步（不补算）"

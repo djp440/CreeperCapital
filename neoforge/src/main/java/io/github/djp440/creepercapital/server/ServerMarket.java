@@ -51,6 +51,9 @@ public final class ServerMarket {
     /** 一次历史请求最多返回多少根 K 线，足够铺满任何屏幕，再留出算 MA99 的余量。 */
     private static final int HISTORY_CANDLES = 500;
 
+    /** 新建世界时预生成多少个市场日的历史（术语表：预生成历史）。 */
+    private static final int BACKFILL_DAYS = 30;
+
     /** 每个合约一个 K 线存储，键是交易代码。 */
     private static final Map<String, KlineStore> KLINE_STORES = new LinkedHashMap<>();
 
@@ -166,7 +169,8 @@ public final class ServerMarket {
         SavedDataStorage storage = event.getServer().getDataStorage();
         MarketSavedData saved = storage.get(MarketSavedData.TYPE);
         Market started;
-        if (saved == null) {
+        boolean created = saved == null;
+        if (created) {
             started = new Market(event.getServer().overworld().getSeed(), specs);
             saved = MarketSavedData.of(started);
             storage.set(MarketSavedData.TYPE, saved);
@@ -181,6 +185,17 @@ public final class ServerMarket {
         data = saved;
         market = started;
         openKlineStores(event.getServer(), started);
+        if (created) {
+            backfill(started);
+        }
+    }
+
+    /** 新世界在 K 线存储接好之后预生成历史，让 K 线一开始就有完整历史；已有世界重启不会走到这里。 */
+    private static void backfill(Market started) {
+        long begin = System.nanoTime();
+        started.backfill(BACKFILL_DAYS);
+        LOGGER.info("预生成 {} 个市场日的历史（{} 个合约）耗时 {} ms，开市时间 {}", BACKFILL_DAYS, started.symbols().size(),
+                (System.nanoTime() - begin) / 1_000_000, started.snapshots().get(0).time());
     }
 
     /** 跳跃事件的落点：现在只写日志，新闻文字之后从这里（或直接订阅 {@link Market#addJumpListener}）挂接。 */

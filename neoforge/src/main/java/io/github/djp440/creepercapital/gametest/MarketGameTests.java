@@ -87,6 +87,7 @@ public final class MarketGameTests {
         });
         function("kline_payloads_round_trip", MarketGameTests::klinePayloadsRoundTrip);
         function("kline_history_follows_the_market", MarketGameTests::klineHistoryFollowsTheMarket);
+        function("new_world_starts_with_thirty_days_of_history", MarketGameTests::newWorldStartsWithThirtyDaysOfHistory);
         function("dev_market_command_is_op_only", MarketGameTests::devMarketCommandIsOpOnly);
         function("dev_market_jump_command_is_op_only", MarketGameTests::devMarketJumpCommandIsOpOnly);
         function("pre_pricing_save_loads_with_zero_premium", MarketGameTests::prePricingSaveLoadsWithZeroPremium);
@@ -265,6 +266,39 @@ public final class MarketGameTests {
                 MockClient.leave(player);
             }
         });
+    }
+
+    /** 新世界的市场带着预生成的历史：每个合约的 1d K 线有 30 根（运行中的市场最多再多出刚开出的当日一根），连续、紧接当前行情。 */
+    private static void newWorldStartsWithThirtyDaysOfHistory(GameTestHelper helper) {
+        ServerPlayer player = MockClient.join(helper, "dave");
+        try {
+            for (String symbol : ServerMarket.symbols()) {
+                ServerMarket.sendKlines(player, symbol, CandlePeriod.D1);
+                ServerMarket.sendKlines(player, symbol, CandlePeriod.H1);
+            }
+            List<KlineHistoryPayload> responses = MockClient.received(player, KlineHistoryPayload.class);
+            int index = 0;
+            for (String symbol : ServerMarket.symbols()) {
+                List<Candle> days = responses.get(index++).candles();
+                List<Candle> hours = responses.get(index++).candles();
+                helper.assertTrue(days.size() >= 30 && days.size() <= 31, symbol + " 的 1d K 线应有 30 根，实际 " + days.size());
+                helper.assertValueEqual(days.get(0).start(), 0L, symbol + " 的历史从市场日历起点开始");
+                for (int i = 1; i < days.size(); i++) {
+                    helper.assertValueEqual(days.get(i).start(), days.get(i - 1).start() + CandlePeriod.D1.seconds(),
+                            symbol + " 的 1d K 线第 " + i + " 根连续");
+                }
+                helper.assertValueEqual(days.get(days.size() - 1).close(), ServerMarket.snapshot(symbol).lastPrice(),
+                        symbol + " 历史的最后一根收在当前最新价格，没有断层");
+                helper.assertTrue(hours.size() > 24, symbol + " 的 1h K 线应远多于一个市场日，实际 " + hours.size());
+                for (int i = 1; i < hours.size(); i++) {
+                    helper.assertValueEqual(hours.get(i).start(), hours.get(i - 1).start() + CandlePeriod.H1.seconds(),
+                            symbol + " 的 1h K 线第 " + i + " 根连续");
+                }
+            }
+            helper.succeed();
+        } finally {
+            MockClient.leave(player);
+        }
     }
 
     /** 市场（两个合约，带一次排队中的跳跃）写进存档文件、重新读出后，市场时间、价格和模型状态与存档时一致，之后紧接着继续推进，不补算。 */
