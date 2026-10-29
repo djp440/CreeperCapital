@@ -32,7 +32,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，表格区切到仓位页。 */
         POSITIONS(minecraft -> TradingScreen.openForTrading("POSITIONS", "")),
         /** 交易界面，表格区切到成交历史页。 */
-        TRADES(minecraft -> TradingScreen.openForTrading("TRADES", ""));
+        TRADES(minecraft -> TradingScreen.openForTrading("TRADES", "")),
+        /** 交易界面，右侧栏切到「最新成交」页。 */
+        LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades());
 
         private final Consumer<Minecraft> opener;
 

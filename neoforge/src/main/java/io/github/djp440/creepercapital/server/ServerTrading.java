@@ -179,6 +179,9 @@ public final class ServerTrading {
     private static void onServerStarting(ServerStartingEvent event) {
         data = event.getServer().getDataStorage().computeIfAbsent(TradingSavedData.TYPE);
         book = data.bind(ServerAccounts.book());
+        // 成交的源头：开平仓以及以后的强平、限价成交都经过这里，全服「最新成交」广播不挂在某个下单入口上
+        MinecraftServer server = event.getServer();
+        book.addTradeListener(trade -> ServerLatestTrades.onPlayerTrade(server, trade));
         LOGGER.info("交易账：流动性池 {} CRP，最近一笔玩家成交编号 {}", book.pool().balance().toDisplayString(),
                 book.state().lastTradeId());
     }
