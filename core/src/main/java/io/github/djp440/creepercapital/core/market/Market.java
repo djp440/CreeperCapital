@@ -149,6 +149,35 @@ public final class Market {
     }
 
     /**
+     * 预生成历史（Backfill）：新建世界时一次性生成过去若干个市场日的行情，让 K 线一开始就有完整历史。
+     * <p>
+     * 走的就是正常的行情步（同一个模型、同一条随机数流），所以预生成结束时的状态就是开市状态，
+     * 与之后的实时行情天然衔接，没有断层。历史里的跳跃不通知监听者（过去的事不发新闻）。
+     * <p>
+     * 停在最后一个市场日的最后一个行情步之前，这样 1d K 线恰好是 {@code days} 根（最后一根是尚未走完的当日 K 线）。
+     * 要在绑定 K 线存储之后调用，历史才会随 K 线收盘追加进文件。
+     *
+     * @param days 预生成多少个市场日，至少 1
+     * @throws IllegalStateException 市场已经走过行情步（已有世界重启时不能重复预生成）
+     */
+    public void backfill(int days) {
+        if (days < 1) {
+            throw new IllegalArgumentException("预生成至少 1 个市场日：" + days);
+        }
+        if (step != 0 || ticksIntoStep != 0) {
+            throw new IllegalStateException("只有还没走过行情步的新市场才能预生成历史，当前行情步 " + step);
+        }
+        long steps = (long) days * IndexModel.STEPS_PER_DAY - 1;
+        while (step < steps) {
+            step++;
+            for (ContractMarket contract : contracts.values()) {
+                contract.next(step, event -> {
+                });
+            }
+        }
+    }
+
+    /**
      * 让某个合约在下一个行情步跳跃（{@code /creeper dev market jump}）。跳跃与那一步的日常波动一起生效，
      * 并作为 {@link JumpEvent.Cause#MANUAL} 事件报告；排队的跳跃随市场状态保存。
      *
