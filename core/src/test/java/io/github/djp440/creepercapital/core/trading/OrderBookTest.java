@@ -384,7 +384,7 @@ class OrderBookTest {
     }
 
     @Test
-    @DisplayName("随机挂单、撤单、行情步、市价单：可用余额 + 冻结 + 仓位保证金 + 池子 的总额不变")
+    @DisplayName("随机挂单、撤单、行情步、市价单、强平（含穿仓、撤销挂单）：可用余额 + 冻结 + 仓位保证金 + 池子 + 基金 的总额不变")
     void totalIsConserved() {
         Random random = new Random(11);
         UUID[] players = {ALICE, BOB, new UUID(0, 3)};
@@ -395,6 +395,8 @@ class OrderBookTest {
         ContractSpec[] specs = {DIAMOND, GUNPOWDER};
         int fills = 0;
         int cancels = 0;
+        int liquidations = 0;
+        int liquidatedOrders = 0;
         long step = 100;
 
         for (int i = 0; i < 3000; i++) {
@@ -404,6 +406,24 @@ class OrderBookTest {
             MarketSnapshot at = snapshot(spec, last, step);
             // 数量按合约大小取，让名义价值都在几千以内，余额够用、委托才能成交
             int maxLots = spec == DIAMOND ? 2000 : 20;
+            if (random.nextInt(10) == 0) {
+                // 价格暴涨暴跌：10 倍杠杆的仓位被强平，同合约的挂单一并撤销；账被清空的玩家补钱（开发命令式调账，总额同步调整）
+                double diamond = DIAMOND.initialPrice() * (0.6 + random.nextDouble() * 0.8);
+                double gunpowder = GUNPOWDER.initialPrice() * (0.6 + random.nextDouble() * 0.8);
+                for (LiquidationEvent event : book.checkLiquidations(
+                        symbol -> symbol.equals("DIAMONDCRP") ? diamond : gunpowder,
+                        symbol -> symbol.equals("DIAMONDCRP") ? DIAMOND.marginTiers() : GUNPOWDER.marginTiers(),
+                        step * 6)) {
+                    liquidations++;
+                    liquidatedOrders += event.cancelledOrders().size();
+                }
+                for (UUID p : players) {
+                    if (accounts.balance(p).compareTo(Money.parse("1000")) < 0) {
+                        accounts.deposit(p, Money.parse("5000"));
+                        expected = expected.plus(Money.parse("5000"));
+                    }
+                }
+            }
             switch (random.nextInt(4)) {
                 case 0 -> orders.placeLimit(player, spec, at, random.nextBoolean() ? Side.LONG : Side.SHORT,
                         1 + random.nextInt(maxLots), 10,
@@ -433,10 +453,12 @@ class OrderBookTest {
         }
         assertTrue(fills > 50, "应有足够多的委托成交：" + fills);
         assertTrue(cancels > 50, "应有足够多的主动撤单：" + cancels);
+        assertTrue(liquidations > 10, "应有足够多的强平：" + liquidations);
+        assertTrue(liquidatedOrders > 0, "强平时应撤销过挂单：" + liquidatedOrders);
     }
 
     private Money total(UUID[] players) {
-        Money total = pool.balance();
+        Money total = pool.balance().plus(book.fund().balance());
         for (UUID player : players) {
             total = total.plus(accounts.balance(player)).plus(orders.frozen(player));
             for (Position position : book.positions(player)) {

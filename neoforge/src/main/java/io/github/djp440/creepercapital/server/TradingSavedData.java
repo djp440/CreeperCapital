@@ -146,10 +146,12 @@ public final class TradingSavedData extends SavedData {
                     .forGetter(state -> flattenModes(state)),
             // 资金费记录是 #13 新增的，旧存档没有这两个字段，缺省为没有记录
             Codec.LONG.optionalFieldOf("last_funding_id", 0L).forGetter(TradingState::lastFundingId),
-            FUNDING_CODEC.listOf().optionalFieldOf("funding", List.of()).forGetter(state -> flattenFunding(state)))
-            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes, lastFundingId, funding) ->
+            FUNDING_CODEC.listOf().optionalFieldOf("funding", List.of()).forGetter(state -> flattenFunding(state)),
+            // 风险保障基金是 #12 新增的，旧存档没有这个字段，缺省为 0
+            MONEY.optionalFieldOf("fund", Money.ZERO).forGetter(TradingState::fundBalance))
+            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes, lastFundingId, funding, fund) ->
                     new TradingState(pool, lastTradeId, groupPositions(positions), groupTrades(trades), lastOrderId,
-                            groupOrders(orders), groupModes(modes), lastFundingId, groupFunding(funding))));
+                            groupOrders(orders), groupModes(modes), lastFundingId, groupFunding(funding), fund)));
 
     public static final Codec<TradingSavedData> CODEC = STATE_CODEC.xmap(TradingSavedData::new, TradingSavedData::state);
 

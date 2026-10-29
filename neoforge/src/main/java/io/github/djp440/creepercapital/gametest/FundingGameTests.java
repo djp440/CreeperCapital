@@ -20,8 +20,10 @@ import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
+import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
+import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
@@ -217,7 +219,11 @@ final class FundingGameTests {
         helper.succeed();
     }
 
-    /** 费率大到逐仓保证金不够付：保证金扣到 0 为止，可用余额不动，仓位留着交给强平检查；差额记入记录；在线玩家得到「未能收付」的提示。 */
+    /**
+     * 费率大到逐仓保证金不够付：保证金扣到 0 为止，可用余额不动，差额记入记录，在线玩家得到「未能收付」的提示；
+     * 保证金被抽干的仓位在同一个行情步随后的强平检查里被强平（#12 接手，顺序是先资金费、后强平），
+     * 强平不碰可用余额，玩家 + 池子 + 基金的总额不变。
+     */
     private static void drainsIsolatedMarginToZeroAndNeverGoesNegative(GameTestHelper helper) {
         ServerPlayer player = TradingGameTests.trader(helper, "FundingDrained", "1000");
         try {
@@ -226,7 +232,7 @@ final class FundingGameTests {
             open(player, OrderPayload.Action.OPEN_LONG, lots);
             Position position = ServerTrading.book().position(id, DIAMOND).orElseThrow();
             Money balanceBefore = ServerAccounts.balance(id);
-            Money totalBefore = TradingGameTests.total(id);
+            Money totalBefore = TradingGameTests.total(id).plus(ServerTrading.book().fund().balance());
 
             // 费率 500%：应付远大于保证金
             MarketSnapshot settlement = at(SETTLEMENT_STEP, 5.0);
@@ -237,12 +243,16 @@ final class FundingGameTests {
             FundingRecord record = ServerTrading.book().fundingRecords(id).get(0);
             helper.assertValueEqual(record.amount(), Money.ZERO.minus(position.margin()), "付出的就是全部保证金");
             helper.assertValueEqual(record.shortfall(), due.minus(position.margin()), "差额记为未收付");
-            Position drained = ServerTrading.book().position(id, DIAMOND).orElseThrow();
-            helper.assertValueEqual(drained.margin(), Money.ZERO, "保证金扣到 0，不为负");
+            helper.assertTrue(ServerTrading.book().position(id, DIAMOND).isEmpty(), "保证金被抽干的仓位在同一步被强平");
+            PlayerTrade liquidation = TradingGameTests.last(ServerTrading.book().trades(id));
+            helper.assertValueEqual(liquidation.kind(), TradeKind.LIQUIDATION, "成交历史里是强平记录");
+            helper.assertValueEqual(liquidation.fee(), Money.ZERO, "保证金一分不剩，清算费为 0");
             helper.assertValueEqual(ServerAccounts.balance(id), balanceBefore, "逐仓不动可用余额");
-            helper.assertValueEqual(TradingGameTests.total(id), totalBefore, "总额不变");
-            helper.assertValueEqual(TradingGameTests.last(MockClient.received(player, OrderResultPayload.class)).code(),
-                    "funding_partial", "未能全额收付的提示");
+            helper.assertValueEqual(TradingGameTests.total(id).plus(ServerTrading.book().fund().balance()), totalBefore,
+                    "玩家 + 池子 + 基金的总额不变");
+            List<String> codes = MockClient.received(player, OrderResultPayload.class).stream().map(OrderResultPayload::code).toList();
+            helper.assertTrue(codes.indexOf("funding_partial") >= 0, "未能全额收付的提示");
+            helper.assertTrue(codes.indexOf("liquidated") > codes.indexOf("funding_partial"), "随后是强平通知：" + codes);
         } finally {
             TradingGameTests.finish(player);
         }

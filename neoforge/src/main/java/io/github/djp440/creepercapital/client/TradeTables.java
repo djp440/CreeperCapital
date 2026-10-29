@@ -122,7 +122,9 @@ final class TradeTables {
             int y = top + HEADER_HEIGHT + i * ROW_HEIGHT;
             int decimals = ClientTrading.params(trade.symbol()).map(p -> p.quantityDecimals()).orElse(0);
             boolean opensLong = (trade.side() == Side.LONG) == (trade.kind() == TradeKind.OPEN);
-            int sideColor = opensLong ? BinancePalette.UP : BinancePalette.DOWN;
+            // 强平用品牌黄色，一眼和主动平仓区分开
+            int sideColor = trade.kind() == TradeKind.LIQUIDATION ? BinancePalette.BRAND_YELLOW
+                    : opensLong ? BinancePalette.UP : BinancePalette.DOWN;
             int pnlColor = trade.realizedPnl().units() > 0 ? BinancePalette.UP
                     : trade.realizedPnl().units() < 0 ? BinancePalette.DOWN : BinancePalette.TEXT_PRIMARY;
             cell(graphics, columns[0], y, MarketFormat.marketTime(new MarketTime(trade.marketSeconds())), BinancePalette.TEXT_SECONDARY);
@@ -214,7 +216,8 @@ final class TradeTables {
             cell(graphics, columns[6], y, Quantities.format(order.lots(), decimalsOf(order)), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[7], y, filled ? order.fee().toDisplayString() : "--", BinancePalette.TEXT_PRIMARY);
             String statusKey = filled ? "filled" : order.cancelReason() == CancelReason.FILL_REJECTED ? "fill_rejected"
-                    : order.cancelReason() == CancelReason.POSITION_CLOSED ? "position_closed" : "cancelled";
+                    : order.cancelReason() == CancelReason.POSITION_CLOSED ? "position_closed"
+                    : order.cancelReason() == CancelReason.LIQUIDATED ? "liquidated" : "cancelled";
             cell(graphics, columns[8], y, Component.translatable("screen.creepercapital.trading.order_status." + statusKey).getString(),
                     filled ? BinancePalette.UP : BinancePalette.TEXT_SECONDARY);
         }

@@ -202,7 +202,16 @@ final class ScreenshotScript {
                     "「历史委托」页签为黄字加下划线；最新一条是 DIAMONDCRP 的「止损·最新价」单，方向「平空」，状态「已撤销」灰字，成交价与手续费显示 \"--\"；"
                             + "委托/触发价列是触发价而不是成交价；列不重叠、无乱码。",
                     View.ORDER_HISTORY,
-                    cancelDiamondStopLoss()));
+                    cancelDiamondStopLoss()),
+            new ScreenshotStep("26", "成交历史：强平记录（3 级验收）",
+                    "「成交历史」页签为黄字加下划线；刚撤掉 DIAMONDCRP 的开空挂单，再用 /creeper dev market jump DIAMONDCRP 15 让价格在下一个行情步上涨，"
+                            + "DIAMONDCRP 逐仓 10x 空头（1.500）被强平；最新的一行在最上面：合约 DIAMONDCRP，方向列是黄字「强平空」（强平记录用品牌黄色，与主动平仓的红绿区分），"
+                            + "成交价就是跳涨后的标记价格（比之前的开空均价高出一成多），数量 1.500；"
+                            + "行情跳涨超过保证金所能承受的幅度（10x 只能扛约 10%），所以这是一次穿仓：保证金不剩，手续费（清算费）显示 0.00，已实现盈亏是个很大的负数（红字，带负号）；"
+                            + "右侧下单面板底部的结果行是红字「DIAMONDCRP 被强平」，完整显示、不被截断；"
+                            + "下面是之前的平仓 / 开仓记录；DIAMONDCRP 的止盈单随仓位消失（可到「历史委托」页看到「已失效（仓位已平）」）；列不重叠、无乱码。",
+                    View.TRADES,
+                    liquidateDiamondShort()));
 
     private ScreenshotScript() {
     }
@@ -322,6 +331,19 @@ final class ScreenshotScript {
         return minecraft -> ClientTrading.openOrdersNewestFirst().stream()
                 .filter(order -> order.symbol().equals("DIAMONDCRP") && order.type() == OrderType.STOP_LOSS)
                 .findFirst().ifPresent(order -> ClientTrading.cancel(order.id()));
+    }
+
+    /**
+     * 制造一次强平：先撤掉 DIAMONDCRP 的开仓挂单（不然跳涨会把那张限价空单成交成新仓位），
+     * 再让 DIAMONDCRP 在下一个行情步上涨 15%，逐仓 10x 空头越过强平价（约 +9.5%），被行情步的强平阶段强平。
+     */
+    private static Consumer<Minecraft> liquidateDiamondShort() {
+        return minecraft -> {
+            ClientTrading.openOrdersNewestFirst().stream()
+                    .filter(order -> order.symbol().equals("DIAMONDCRP") && !order.reduceOnly())
+                    .forEach(order -> ClientTrading.cancel(order.id()));
+            minecraft.player.connection.sendCommand("creeper dev market jump DIAMONDCRP 15");
+        };
     }
 
     /** 下单推迟到打开视图后第几个 tick：截图在第 40 个 tick，留 4 个 tick 让成交到达，同时避免模拟成交很快把玩家成交挤出可视范围。 */

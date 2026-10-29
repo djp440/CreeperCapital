@@ -8,6 +8,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -21,6 +23,7 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.FundingRecord;
+import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
@@ -280,8 +283,12 @@ public final class ServerTrading {
             };
             return new OrderResultPayload(true, code, args);
         }
-        return new OrderResultPayload(event.cancelReason() == CancelReason.USER,
-                event.cancelReason() == CancelReason.USER ? "order_cancelled" : "order_cancelled_rejected", args);
+        String code = switch (event.cancelReason()) {
+            case USER -> "order_cancelled";
+            case LIQUIDATED -> "order_cancelled_liquidated";
+            default -> "order_cancelled_rejected";
+        };
+        return new OrderResultPayload(event.cancelReason() == CancelReason.USER, code, args);
     }
 
     private static OrderResultPayload rejected(String code, String... args) {
@@ -320,8 +327,9 @@ public final class ServerTrading {
         if (!events.isEmpty()) {
             markDirty();
         }
-        // 同一个行情步内的顺序：① 委托触发（上面）→ ② 资金费结算 → ③ 强平检查（#12）。后加的阶段按这个顺序接在后面
+        // 同一个行情步内的顺序：① 委托触发（上面）→ ② 资金费结算 → ③ 强平检查。后加的阶段按这个顺序接在后面
         touched.addAll(settleFunding(server, snapshots));
+        liquidationStage(server, snapshots, touched);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (touched.contains(player.getUUID())) {
                 sendState(player);
@@ -330,6 +338,49 @@ public final class ServerTrading {
                 ModPayloads.sendTo(player, new AccountPayload(assets(player.getUUID())));
             }
         }
+    }
+
+    /** 行情步的第 ③ 阶段：用这一步的标记价格检查全部仓位（离线玩家同样检查），强平的玩家记入 {@code touched}。 */
+    private static void liquidationStage(MinecraftServer server, List<MarketSnapshot> snapshots, Set<UUID> touched) {
+        if (snapshots.isEmpty()) {
+            return;
+        }
+        liquidate(server, snapshots.get(0).time().totalSeconds(), ServerTrading::markPrice, player -> true, touched);
+    }
+
+    /**
+     * 强平检查并通知。{@code players} 限定检查哪些玩家的仓位：生产代码检查所有人；GameTest 共用一个活账本，
+     * 用它把人为注入的极端价格限制在测试自己的玩家身上。
+     */
+    public static List<LiquidationEvent> liquidate(MinecraftServer server, long marketSeconds,
+            ToDoubleFunction<String> markPrice, Predicate<UUID> players, Set<UUID> touched) {
+        List<LiquidationEvent> events = book().checkLiquidations(players, markPrice,
+                symbol -> ServerMarket.spec(symbol).marginTiers(), marketSeconds);
+        for (LiquidationEvent event : events) {
+            LOGGER.info("强平 {} {} {}：{} 抵押损失 {} 进基金 {} 穿仓 {}（基金垫付 {}，池子承担 {}），同时撤销挂单 {} 张", event.player(),
+                    event.mode(), event.symbols(), event.positions().stream()
+                            .map(p -> p.side() + " " + p.lots() + " @ " + p.price() + " 盈亏 " + p.realizedPnl() + " 清算费 " + p.fee())
+                            .toList(),
+                    event.collateralLost(), event.toFund(), event.shortfall(), event.fundCovered(), event.poolBorne(),
+                    event.cancelledOrders().size());
+            touched.add(event.player());
+            ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
+            if (owner == null) {
+                continue;
+            }
+            ModPayloads.sendTo(owner, new OrderResultPayload(false, "liquidated",
+                    List.of(String.join(", ", event.symbols()), event.collateralLost().toDisplayString())));
+            for (OrderEvent cancelled : event.cancelledOrders()) {
+                OrderResultPayload notice = describe(cancelled);
+                if (notice != null) {
+                    ModPayloads.sendTo(owner, notice);
+                }
+            }
+        }
+        if (!events.isEmpty()) {
+            markDirty();
+        }
+        return events;
     }
 
     /**
