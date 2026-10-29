@@ -135,4 +135,27 @@ class ContractSpecTest {
         assertEquals(1.5, diamond.quantityOf(1500), 1e-12);
         assertEquals(7.0, gunpowder.quantityOf(7), 1e-12);
     }
+
+    @Test
+    @DisplayName("流动性深度：内置钻石 0.05%、火药 0.3%，没写的合约默认 0.1%，随交易参数同步给客户端")
+    void depthSlippageHasDefaultsAndIsSynced() {
+        ContractSpec diamond = ContractSpec.defaults().get(0);
+        ContractSpec gunpowder = ContractSpec.defaults().get(1);
+
+        assertEquals(0.0005, diamond.depthSlippage());
+        assertEquals(0.003, gunpowder.depthSlippage());
+        assertEquals(0.001, spec("BLAZERODCRP", 250, 1, PROFILE).depthSlippage());
+        assertEquals(0.001, ContractSpec.DEFAULT_DEPTH_SLIPPAGE);
+        assertEquals(0.003, gunpowder.trading().depthSlippage());
+    }
+
+    @Test
+    @DisplayName("流动性深度必须是 0（无限深）到 0.5（不含）之间的有限数")
+    void depthSlippageIsValidated() {
+        for (double bad : new double[] {-0.001, 0.5, 2, Double.NaN, Double.POSITIVE_INFINITY}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0.1, 20, 3, bad), "滑点 " + bad);
+        }
+        assertEquals(0.0, new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0.1, 20, 3, 0).depthSlippage());
+    }
 }
