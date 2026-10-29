@@ -36,6 +36,11 @@ public record Position(String symbol, Side side, long lots, double entryPrice, i
         return new Position(symbol, side, lots, entryPrice, newLeverage, newMargin, quantityDecimals, mode);
     }
 
+    /** 同一仓位换成另一份保证金（资金费结算收付逐仓保证金时用）。 */
+    Position withMargin(Money newMargin) {
+        return new Position(symbol, side, lots, entryPrice, leverage, newMargin, quantityDecimals, mode);
+    }
+
     /** 按某个价格估算的盈亏（做多 (价格 − 开仓均价) × 数量，做空反之），取整到最小金额单位。 */
     public Money pnlAt(double price) {
         return pnl(side, entryPrice, price, lots, quantityDecimals);

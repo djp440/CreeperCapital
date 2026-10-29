@@ -41,7 +41,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，表格区切到历史委托页。 */
         ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", "")),
         /** 交易界面，右侧栏切到「最新成交」页。 */
-        LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades());
+        LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades()),
+        /** 交易界面，表格区切到资金费记录页。 */
+        FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", ""));
 
         private final Consumer<Minecraft> opener;
 

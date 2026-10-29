@@ -17,6 +17,7 @@ import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
@@ -91,6 +92,7 @@ final class TradingGameTests {
             }
         });
         LimitOrderGameTests.register(function);
+        FundingGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
@@ -124,7 +126,9 @@ final class TradingGameTests {
                                 OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
                         new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
                                 OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)),
-                List.of(DIAMOND));
+                List.of(DIAMOND),
+                List.of(new FundingRecord(5, player, DIAMOND, Side.SHORT, MarginMode.CROSS, 2500, -0.000123, 1034.56,
+                        Money.parse("2586.4"), Money.parse("0.318127"), Money.parse("0.000002"), 28800)));
         TradingStatePayload.STREAM_CODEC.encode(buffer, state);
         helper.assertValueEqual(TradingStatePayload.STREAM_CODEC.decode(buffer), state, "交易状态载荷");
 

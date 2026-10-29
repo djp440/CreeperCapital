@@ -12,6 +12,7 @@ import org.jspecify.annotations.Nullable;
 import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMath;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
@@ -45,6 +46,7 @@ public final class ClientTrading {
     /** 玩家设为全仓的合约（没有仓位时，保证金模式只在这里）。 */
     private static Set<String> crossSymbols = Set.of();
     private static List<Order> orders = List.of();
+    private static List<FundingRecord> funding = List.of();
     /** 下单面板当前选的是限价（否则市价）；只是界面选择。 */
     private static boolean limitMode;
     private static @Nullable Message lastResult;
@@ -59,6 +61,7 @@ public final class ClientTrading {
         trades = List.copyOf(payload.trades());
         crossSymbols = Set.copyOf(payload.crossSymbols());
         orders = List.copyOf(payload.orders());
+        funding = List.copyOf(payload.funding());
     }
 
     static void accept(OrderResultPayload payload) {
@@ -73,6 +76,7 @@ public final class ClientTrading {
         trades = List.of();
         crossSymbols = Set.of();
         orders = List.of();
+        funding = List.of();
         limitMode = false;
         lastResult = null;
     }
@@ -93,6 +97,13 @@ public final class ClientTrading {
     /** 最近的成交，最新的在前。 */
     public static List<PlayerTrade> tradesNewestFirst() {
         List<PlayerTrade> newestFirst = new ArrayList<>(trades);
+        java.util.Collections.reverse(newestFirst);
+        return newestFirst;
+    }
+
+    /** 资金费记录，最新的在前。 */
+    public static List<FundingRecord> fundingNewestFirst() {
+        List<FundingRecord> newestFirst = new ArrayList<>(funding);
         java.util.Collections.reverse(newestFirst);
         return newestFirst;
     }

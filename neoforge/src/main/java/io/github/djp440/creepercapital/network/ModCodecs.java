@@ -8,6 +8,7 @@ import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketTrade;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
@@ -83,6 +84,21 @@ final class ModCodecs {
             MONEY, PlayerTrade::realizedPnl,
             ByteBufCodecs.VAR_LONG, PlayerTrade::marketSeconds,
             PlayerTrade::new);
+
+    static final StreamCodec<ByteBuf, FundingRecord> FUNDING = StreamCodec.composite(
+            ByteBufCodecs.VAR_LONG, FundingRecord::id,
+            UUIDUtil.STREAM_CODEC, FundingRecord::player,
+            SYMBOL, FundingRecord::symbol,
+            SIDE, FundingRecord::side,
+            MARGIN_MODE, FundingRecord::mode,
+            ByteBufCodecs.VAR_LONG, FundingRecord::lots,
+            ByteBufCodecs.DOUBLE, FundingRecord::rate,
+            ByteBufCodecs.DOUBLE, FundingRecord::markPrice,
+            MONEY, FundingRecord::notional,
+            MONEY, FundingRecord::amount,
+            MONEY, FundingRecord::shortfall,
+            ByteBufCodecs.VAR_LONG, FundingRecord::marketSeconds,
+            FundingRecord::new);
 
     static final StreamCodec<ByteBuf, MarketTrade> MARKET_TRADE = StreamCodec.composite(
             SYMBOL, MarketTrade::symbol,

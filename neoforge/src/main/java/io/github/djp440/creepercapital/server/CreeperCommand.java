@@ -26,6 +26,8 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 public final class CreeperCommand {
     /** 一次快进最多的行情步数，约 10 个市场日。 */
     private static final int MAX_ADVANCE_STEPS = 150_000;
+    /** 一次快进最多经过多少个资金费结算点（10 个市场日）。 */
+    private static final int MAX_FUNDING_PERIODS = 30;
     /** 手动跳跃的幅度范围（百分比）：跌幅不到 100%，价格不能为负；涨幅封顶防止手滑。 */
     private static final double MIN_JUMP_PERCENT = -99.0;
     private static final double MAX_JUMP_PERCENT = 1_000.0;
@@ -75,6 +77,15 @@ public final class CreeperCommand {
                                                 .executes(context -> {
                                                     int steps = ServerMarket.advance(context.getSource().getServer(),
                                                             IntegerArgumentType.getInteger(context, "steps"));
+                                                    context.getSource().sendSuccess(() -> Component.translatable(
+                                                            "commands.creepercapital.market.advanced", steps), true);
+                                                    return Command.SINGLE_SUCCESS;
+                                                })))
+                                .then(Commands.literal("funding")
+                                        .then(Commands.argument("periods", IntegerArgumentType.integer(1, MAX_FUNDING_PERIODS))
+                                                .executes(context -> {
+                                                    int steps = ServerMarket.advanceToFunding(context.getSource().getServer(),
+                                                            IntegerArgumentType.getInteger(context, "periods"));
                                                     context.getSource().sendSuccess(() -> Component.translatable(
                                                             "commands.creepercapital.market.advanced", steps), true);
                                                     return Command.SINGLE_SUCCESS;

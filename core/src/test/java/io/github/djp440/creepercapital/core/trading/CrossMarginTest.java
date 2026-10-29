@@ -397,6 +397,8 @@ class CrossMarginTest {
         ContractSpec[] specs = {DEEP_DIAMOND, DEEP_GUNPOWDER};
         int crossFills = 0;
         int adjustments = 0;
+        int settled = 0;
+        int shortfalls = 0;
 
         for (int i = 0; i < 3000; i++) {
             UUID player = players[random.nextInt(players.length)];
@@ -429,6 +431,21 @@ class CrossMarginTest {
                 book.setMarginMode(player, spec.symbol(),
                         random.nextBoolean() ? MarginMode.CROSS : MarginMode.ISOLATED);
             }
+            if (i % 20 == 19) {
+                // 资金费结算：多数是正常费率，偶尔极端费率把逐仓保证金 / 全仓余额扣到 0 或让池子付不起
+                double rate = i % 100 == 99 ? (random.nextBoolean() ? 3.0 : -3.0) : (random.nextDouble() - 0.5) * 0.006;
+                long settleStep = 4800L * (i + 1);
+                for (ContractSpec each : specs) {
+                    double price = each == DEEP_DIAMOND ? diamondPrice : gunpowderPrice;
+                    for (FundingRecord record : book.settleFunding(
+                            new MarketSnapshot(settleStep, each.symbol(), price, price, price, rate, 0))) {
+                        settled++;
+                        if (record.shortfall().isPositive()) {
+                            shortfalls++;
+                        }
+                    }
+                }
+            }
             assertEquals(expected, total(players), "第 " + i + " 次操作之后总额变了");
             for (UUID p : players) {
                 assertFalse(accounts.balance(p).units() < 0, "第 " + i + " 次操作之后余额为负");
@@ -436,6 +453,8 @@ class CrossMarginTest {
         }
         assertTrue(crossFills > 50, "应有足够多的全仓成交：" + crossFills);
         assertTrue(adjustments > 50, "应有足够多的杠杆调整：" + adjustments);
+        assertTrue(settled > 100, "应有足够多的资金费结算：" + settled);
+        assertTrue(shortfalls > 0, "极端费率应触发过扣到 0 的情形：" + shortfalls);
     }
 
     private Money total(UUID[] players) {

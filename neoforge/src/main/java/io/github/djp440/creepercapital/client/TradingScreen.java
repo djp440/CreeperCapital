@@ -52,7 +52,8 @@ public final class TradingScreen extends Screen {
         POSITIONS("screen.creepercapital.trading.table.positions"),
         OPEN_ORDERS("screen.creepercapital.trading.table.open_orders"),
         ORDER_HISTORY("screen.creepercapital.trading.table.order_history"),
-        TRADES("screen.creepercapital.trading.table.trades");
+        TRADES("screen.creepercapital.trading.table.trades"),
+        FUNDING("screen.creepercapital.trading.table.funding");
 
         private final String key;
 
@@ -494,6 +495,10 @@ public final class TradingScreen extends Screen {
             case TRADES -> {
                 tables.forgetButtons();
                 tables.extractTrades(graphics, PADDING, bodyTop, width - PADDING, height);
+            }
+            case FUNDING -> {
+                tables.forgetButtons();
+                tables.extractFunding(graphics, PADDING, bodyTop, width - PADDING, height);
             }
         }
     }

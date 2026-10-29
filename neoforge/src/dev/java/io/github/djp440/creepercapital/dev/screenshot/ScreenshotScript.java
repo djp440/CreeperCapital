@@ -170,9 +170,24 @@ final class ScreenshotScript {
                             + "全仓的强平价和保证金率几乎不变（全仓钱包没有变，调杠杆只是把可用余额挪进保证金）；"
                             + "DIAMONDCRP 逐仓那一行不变；列不重叠、无乱码。",
                     View.POSITIONS,
-                    lowerGunpowderLeverage()));
+                    lowerGunpowderLeverage()),
+            new ScreenshotStep("22", "资金费记录页（快进经过两个结算点，3 级验收）",
+                    "表格区的「资金费记录」页签为黄字加下划线；表头：时间、合约、方向、资金费率、标记价格、名义价值、资金费(CRP)、未收付；"
+                            + "刚用 /creeper dev market funding 2 快进了两个结算点（行情栏倒计时走到 00:00:00 的那一步各结算一次），"
+                            + "所以有四行记录（最新的在上，每个结算点两行：GUNPOWDERCRP 全仓多头和 DIAMONDCRP 逐仓空头），"
+                            + "两个结算点的市场时间相差 8 小时（形如「第 N 日 08:00:00」「第 N 日 16:00:00」，时间栏是 HH:mm:ss 格式的市场时间）；"
+                            + "金额收付由费率符号与方向决定：费率为正时多头付（红字，带负号）、空头收（绿字，带正号），费率为负时相反（两行可能同为付出，取决于两个合约各自的费率符号），"
+                            + "金额 = 名义价值 × 资金费率（例如名义价值 40,000 CRP、费率 0.2700% 时约 108 CRP）；下单面板结果行是「资金费已支付 / 已收到 … CRP」；"
+                            + "方向列多绿空红；未收付列都是灰色的 \"--\"（仓位保证金 / 余额足够）；列不重叠、无乱码。",
+                    View.FUNDING,
+                    settleFundingTwice()));
 
     private ScreenshotScript() {
+    }
+
+    /** 快进经过两个资金费结算点（服务端精确停在结算点那一步，触发结算）；仓位沿用前面步骤留下的全仓多头与逐仓空头。 */
+    private static Consumer<Minecraft> settleFundingTwice() {
+        return minecraft -> minecraft.player.connection.sendCommand("creeper dev market funding 2");
     }
 
     private static Consumer<Minecraft> select(CandlePeriod period) {
