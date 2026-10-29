@@ -39,7 +39,7 @@ class MarginMathTest {
     }
 
     @Test
-    @DisplayName("逐仓多头：保证金率 = 维持保证金 / (保证金 + 未实现盈亏)，强平价按币安公式")
+    @DisplayName("逐仓多头：保证金率 = 维持保证金 / (保证金 + 未实现盈亏)，强平价按公式计算")
     void isolatedLong() {
         // 2 个钻石 @1000，10 倍，保证金 200；标记价格 950：名义价值 1900，维持保证金 1900 × 0.4% = 7.6，浮亏 100，保证金余额 100
         Position position = diamond(Side.LONG, 2000, 1000, 10, "200", MarginMode.ISOLATED);

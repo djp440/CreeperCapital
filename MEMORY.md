@@ -30,7 +30,7 @@
 - 布局改成纯函数 `client/TradingLayout.compute(width, height, tickerRows)`：深色底上卡片式布局，卡片间距 `GAP = 4`；右侧下单面板**通栏到底**（宽 = 屏宽 26%，夹在 150～200），左侧上为图表（+ 盘口栏）、下为表格区（高 = 左侧高度 36%，夹在 64～260，且优先保证图表最小高度 100）。`TradingLayoutTest` 在 8 种窗口（854×480～2560×1440、1024×768、800×600）× GUI 缩放 0（自动）～4 换算出的界面尺寸，以及最小 320×240 上断言卡片互不重叠、不出屏、各自不小于最小尺寸。
 - 降级顺序（写在 `TradingLayout` 类注释里）：① 高度 < 330（1080p 自动缩放 480×270、1280×720 自动缩放 427×240 都算）省掉标题栏、行情栏只排一行；② 左侧放不下「图表 ≥ 220 + 盘口栏」时盘口 / 最新成交并进图表区，与 K 线同一页签条切换（`ColumnMode.TABBED`）；③ 表格列放不下时按优先级隐藏次要列（`LayoutFit.columns`），只剩必须列仍放不下就等比缩窄、文字「…」截断；④ 页签条依次试全名宽松 → 全名紧凑 → 短名（`table.*.short` 键）→ 最紧，仍放不下由裁剪兜底。
 - 行情栏 `LayoutFit.ticker`：按显示顺序排，最多 2 行（矮屏 1 行），超了按优先级从低到高丢（最新价 10 > 涨跌 9 > 标记价 8 > 资金费 7 > 市场时间 6 > 指数价 5 > 24h 高 4 > 低 3 > 成交量 2），排得下以后再按优先级从高到低把丢掉的逐个放回试（回填，避免丢了一项宽的以后留空白）。
-- 涨跌色：`ClientConfig`（NeoForge CLIENT 配置 `config/creepercapital-client.toml`，项 `colorScheme` = `GREEN_UP` | `RED_UP`，默认 `GREEN_UP`）+ `ColorScheme` 枚举。所有涨跌语义只走 `BinancePalette.up()/down()/side(Side)/signed(x)/direction(cur, prev)`，每次绘制时读配置，所以切换立即生效、无缓存。品牌黄（强平 / ADL 方向、资金费率、选中页签）与中性灰不随配色变。入口两个：① 交易界面行情栏卡片第一行最右端的按钮（两个色块 + 「绿涨红跌 / 红涨绿跌」），点击切换并写回配置；② 模组列表 → Creeper Capital → 配置（NeoForge `ConfigurationScreen`）→「涨跌色」。
+- 涨跌色：`ClientConfig`（NeoForge CLIENT 配置 `config/creepercapital-client.toml`，项 `colorScheme` = `GREEN_UP` | `RED_UP`，默认 `GREEN_UP`）+ `ColorScheme` 枚举。所有涨跌语义只走 `TradingPalette.up()/down()/side(Side)/signed(x)/direction(cur, prev)`，每次绘制时读配置，所以切换立即生效、无缓存。品牌黄（强平 / ADL 方向、资金费率、选中页签）与中性灰不随配色变。入口两个：① 交易界面行情栏卡片第一行最右端的按钮（两个色块 + 「绿涨红跌 / 红涨绿跌」），点击切换并写回配置；② 模组列表 → Creeper Capital → 配置（NeoForge `ConfigurationScreen`）→「涨跌色」。
 - 颜色口径：下单成功消息用中性白、失败固定红（不随配色，红在两种配色里都有「警示」含义）；保证金率 ≥ 50% 品牌黄、≥ 80% 用 `down()`；按钮「开多 / 买」用 `up()`，「开空 / 卖」用 `down()`；预估为空（未输数量）显示中性「--」，不着涨跌色。
 - 下单预估与实际成交同源：core 新增 `TradingBook.estimateOpen(params, lastPrice, side, lots, leverage)` → `Optional<OpenEstimate>`，内部调用与 `open` 相同的 `fillPrice` 曲线（深度滑点 + 点差）；面板显示「开多均价 / 开空均价」两行，保证金与手续费按名义价值较高的一侧（开多）显示，偏保守。`TradingBookTest` 3 例断言预估均价 = 实际开仓均价。
 - 玩家成交停留：`PlayerTradePins`，玩家成交到达后在「最新成交」顶部置顶区停留 **30 秒（真实时间）**，最多 **3 笔**、最多占半页，带品牌黄左边条与底色、第二行标「玩家 <名字>」；下方仍按时间倒序显示全部成交（含这几笔），时间线不被篡改。选这个方案而不是「玩家成交权重更高 / 少挤出」的理由：feed 本身保持诚实（全服可见、只保留最近 50 笔缓存不变），置顶只延长可见时间，不改服务端、不改载荷。
@@ -72,7 +72,7 @@
 
 ## 2026-10-29 18:20 止盈止损与只减仓（#15）
 
-- 语义对齐币安固定数量单：止盈止损是**固定数量、只减仓**的平仓委托（附带单 = 开仓数量；`PROTECT` 补设 = 载荷数量，留空 = 当时整个仓位）；触发时取 `min(委托数量, 当前仓位)`，实际手数写进历史委托的 `lots`。不做 closePosition 整仓平。
+- 固定数量单语义：止盈止损是**固定数量、只减仓**的平仓委托（附带单 = 开仓数量；`PROTECT` 补设 = 载荷数量，留空 = 当时整个仓位）；触发时取 `min(委托数量, 当前仓位)`，实际手数写进历史委托的 `lots`。不做 closePosition 整仓平。
 - 只减仓无仓位 → 拒绝 `NO_POSITION`；数量超过仓位则接受并在成交时缩减（永不反向开仓）；仓位消失（全平 / 强平）自动撤单 `POSITION_CLOSED`。同仓位的止盈止损不联动（无 OCO），仓位还有剩余时另一张继续挂着。下单时触发价已会立刻触发 → `INVALID_TRIGGER_PRICE`；基准价：市价单 / `PROTECT` 用触发价来源当前价，限价开仓附带的用限价。
 - 触发后按**市价**成交（`TradingBook.fillPrice`，含半个点差与滑点），收 taker 费，等价于同数量同方向市价平仓（`triggerFillEqualsTheSameSizeMarketClose` 证明）；算不出价格时保持挂着。限价平仓 = 只减仓限价单，不冻结资金，按委托价 + maker 费成交。触发价来源 `TriggerSource.LAST` 缺省 / `MARK`。
 - 结构：仍是 #14 的 `OrderBook`。`Order` 加第 16 个字段 `extras`：`RecordCodecBuilder` 上限 16、`StreamCodec.composite` 上限 12，所以网络 codec 手写、存档 extras 用 `optionalFieldOf`（旧档照常加载）。再加字段要重构 `Order`。`TradingBook.close` 拆成校验算价 + `closeAt`，资金流同源所以守恒式不变。`OrderEvent` 13 字段，`Kind` 加 `TRIGGERED`（`TRIGGERED` → `FILLED`）；玩家自己平仓引起的失效先入 `OrderBook.deferred`，由 `takeEvents()` 取走。
@@ -95,10 +95,10 @@
 
 ## 2026-10-29 17:55 全仓与杠杆分档（#11）
 
-- 公式取自币安官方 FAQ。强平价 `LP = (WB − TMM1 + UPNL1 + cum − s·q·EP) / (q·MMR − s·q)`，若落在另一档用那一档的 MMR/cum 重算，取与档位自洽的解（`MarginMath.liquidationPrice` 逐档扫描）。单一来源 `core/trading/MarginMath` + `core/market/MarginTiers`，客户端与服务端共用，强平不得复制公式。保证金率 = 维持保证金 / 保证金余额（币安页面无明确定义），≥ 100% 强平，余额 ≤ 0 记 +∞；全仓所有仓位共用一个保证金率。
+- 公式取自交易所官方 FAQ。强平价 `LP = (WB − TMM1 + UPNL1 + cum − s·q·EP) / (q·MMR − s·q)`，若落在另一档用那一档的 MMR/cum 重算，取与档位自洽的解（`MarginMath.liquidationPrice` 逐档扫描）。单一来源 `core/trading/MarginMath` + `core/market/MarginTiers`，客户端与服务端共用，强平不得复制公式。保证金率 = 维持保证金 / 保证金余额（交易所页面无明确定义），≥ 100% 强平，余额 ≤ 0 记 +∞；全仓所有仓位共用一个保证金率。
 - 档位：`ContractSpec.marginTiers`，配置字段 `maintenance_tiers` 可选（缺字段不回写；第一档杠杆必须等于 `max_leverage`），每档 `(上界, 最高杠杆, 维持保证金率)`，速算额自动推出 `cum_k = cum_{k-1} + lower_k × (r_k − r_{k-1})`；校验上界严格递增、杠杆不升、费率不降、费率 × 杠杆 < 1。缺省档位上界 = `DEFAULT_MAX_NOTIONAL`（500,000 CRP）的 1/5/20/50/100%，杠杆 = round(最高 × [1,.8,.4,.16,.08])，费率 = round(0.5/杠杆)。**高杠杆被分档限制成小仓位**：50x 的火药单仓名义价值上限只有 5000 CRP，钻石 125x 第一档上界 5000；开仓超限 `POSITION_LIMIT`，杠杆超合约最高仍是 `INVALID_LEVERAGE`（先判）。
-- `Assets` 口径：wallet = 可用 + 全部保证金（+ 冻结）；逐仓未实现盈亏最低记 −保证金，全仓不设下限；**availableBalance = max(0, free + min(0, Σ全仓浮亏))**，全仓浮盈在平仓落袋前不能当可用（比币安保守）。全仓平仓亏损最多亏到“释放保证金 + free”，手续费从 free 垫付。
-- 保证金模式按 (玩家, 合约) 存，缺省逐仓；存档只存全仓设置 `margin_modes`，仓位带 `margin_mode`；有仓位或挂单时不能切换（`MARGIN_MODE_LOCKED`）。`adjustLeverage`：杠杆须 ≤ 合约最高和当前名义价值所在档最高（`LEVERAGE_ABOVE_TIER`）；调低杠杆（增保证金）要可用余额够，调高杠杆退保证金时逐仓检查调整后保证金率仍 < 100%（`LEVERAGE_UNSAFE`）。逐仓两个方向都允许（与币安不同），因为没有单独的追加保证金操作。
+- `Assets` 口径：wallet = 可用 + 全部保证金（+ 冻结）；逐仓未实现盈亏最低记 −保证金，全仓不设下限；**availableBalance = max(0, free + min(0, Σ全仓浮亏))**，全仓浮盈在平仓落袋前不能当可用（偏保守）。全仓平仓亏损最多亏到“释放保证金 + free”，手续费从 free 垫付。
+- 保证金模式按 (玩家, 合约) 存，缺省逐仓；存档只存全仓设置 `margin_modes`，仓位带 `margin_mode`；有仓位或挂单时不能切换（`MARGIN_MODE_LOCKED`）。`adjustLeverage`：杠杆须 ≤ 合约最高和当前名义价值所在档最高（`LEVERAGE_ABOVE_TIER`）；调低杠杆（增保证金）要可用余额够，调高杠杆退保证金时逐仓检查调整后保证金率仍 < 100%（`LEVERAGE_UNSAFE`）。逐仓两个方向都允许（与常见做法不同），因为没有单独的追加保证金操作。
 - 踩坑：`Money.toDisplayString()` 是 `#,##0.00####`，测试里期望的参数串写 "5,000.00" 不是 "5000"；界面保证金列最长 12 位，列宽权重要留够（曾与盈亏列粘连）；Windows 下 Bash 工具会拒绝长 heredoc，脚本先写进文件再跑。
 
 ## 2026-10-29 17:40 虚拟流动性曲线（#16）
@@ -147,7 +147,7 @@
 
 ## 2026-10-29 12:00 双层定价的设计取舍（#5）
 
-- 资金费率的 P 用币安时间加权均值 (1·P1+…+n·Pn)/(1+…+n)，状态只存样本数和加权和；标记价格里的「最近一期资金费率」取本期实时预估费率（用户确认）。
+- 资金费率的 P 用时间加权均值 (1·P1+…+n·Pn)/(1+…+n)，状态只存样本数和加权和；标记价格里的「最近一期资金费率」取本期实时预估费率（用户确认）。
 - 结算点那一步的采样归旧期，下一步才清零开新期；倒计时在结算点显示 00:00:00。基差每市场分钟采样、取最近 30 个。
 - 溢价与指数价格共用同一个 `MarketRandom`（存档只多一组定价状态，不多一个随机数状态）；代价是加入溢价后同一种子的指数路径与以前不同，发布前无影响。
 - `MarketSnapshotPayload` 字段变化时要升 `ModPayloads.PROTOCOL_VERSION`，否则新旧端不报版本不匹配而是解码失败。

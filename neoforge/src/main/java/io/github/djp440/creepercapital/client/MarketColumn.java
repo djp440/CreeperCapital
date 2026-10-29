@@ -6,7 +6,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * 盘口栏（币安的「盘口 / 最新成交」栏）：顶部一排页签，下面是当前页。
+ * 盘口栏（「盘口 / 最新成交」栏）：顶部一排页签，下面是当前页。
  * 目前有「盘口」页（{@link OrderBookPage}）和「最新成交」页（{@link LatestTradesPage}）；再加页就往 {@link Page} 里追加一个枚举值，
  * 并在 {@link #extractPage} 的 {@code switch} 里画它。
  * <p>
@@ -57,14 +57,14 @@ final class MarketColumn {
 
     /** 单独一栏：卡片底色、页签条（当前页黄字加下划线）和当前页。 */
     void extract(GuiGraphicsExtractor graphics, TradingLayout.Rect card, String symbol, MarketSnapshot snapshot, int mouseX, int mouseY) {
-        graphics.fill(card.left(), card.top(), card.right(), card.bottom(), BinancePalette.PANEL);
+        graphics.fill(card.left(), card.top(), card.right(), card.bottom(), TradingPalette.PANEL);
         Page[] pages = Page.values();
         Component[] labels = new Component[pages.length];
         for (int i = 0; i < pages.length; i++) {
             labels[i] = pages[i].label();
         }
         tabBoxes = TabStrip.extract(graphics, font, card.left() + 4, card.top(), TAB_HEIGHT, labels, page.ordinal(), 6, mouseX, mouseY);
-        graphics.horizontalLine(card.left(), card.right() - 1, card.top() + TAB_HEIGHT, BinancePalette.DIVIDER);
+        graphics.horizontalLine(card.left(), card.right() - 1, card.top() + TAB_HEIGHT, TradingPalette.DIVIDER);
         extractPage(graphics, card.left(), card.top() + TAB_HEIGHT + 1, card.right(), card.bottom(), symbol, snapshot);
     }
 

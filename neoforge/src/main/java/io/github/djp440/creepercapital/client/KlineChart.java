@@ -12,7 +12,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * K 线图（币安配色，涨跌色跟随 {@link ColorScheme}）：上方是蜡烛图加三条均线，下方是成交量柱，右侧是价格轴，底部是市场时间轴，
+ * K 线图（深色配色，涨跌色跟随 {@link ColorScheme}）：上方是蜡烛图加三条均线，下方是成交量柱，右侧是价格轴，底部是市场时间轴，
  * 最新一根贴着右边，往左依次是更早的 K 线。鼠标悬停某根时图例显示它的开高低收、成交量和均线值，时间轴上标出它的时间。
  * 图例逐项排，放不下的项不画；价格轴刻度避开最新价格标签，不与成交量刻度相碰。
  * <p>
@@ -20,7 +20,7 @@ import net.minecraft.network.chat.Component;
  */
 final class KlineChart {
     private static final int[] MA_PERIODS = {7, 25, 99};
-    private static final int[] MA_COLORS = {BinancePalette.MA_7, BinancePalette.MA_25, BinancePalette.MA_99};
+    private static final int[] MA_COLORS = {TradingPalette.MA_7, TradingPalette.MA_25, TradingPalette.MA_99};
 
     /** 每根 K 线占的横向像素，实体宽 {@link #BODY}，影线在正中间 1 像素。 */
     private static final int SLOT = 7;
@@ -116,7 +116,7 @@ final class KlineChart {
                         slotLeft + (SLOT - BODY) / 2 + BODY, volumeBottom, (color & 0x00FFFFFF) | VOLUME_ALPHA);
             }
         }
-        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, TradingPalette.TEXT_SECONDARY, false);
 
         for (int k = 0; k < MA_PERIODS.length; k++) {
             extractAverage(graphics, ma[k], first, visible, slotsLeft, scale, MA_COLORS[k]);
@@ -131,8 +131,8 @@ final class KlineChart {
             String time = MarketFormat.marketTime(new MarketTime(candles.get(hovered).start()));
             int timeWidth = font.width(time) + 6;
             int timeLeft = Math.max(left, Math.min(centerX - timeWidth / 2, plotRight - timeWidth));
-            graphics.fill(timeLeft, timeAxisTop, timeLeft + timeWidth, bottom, BinancePalette.DIVIDER);
-            graphics.text(font, time, timeLeft + 3, timeAxisTop + 1, BinancePalette.TEXT_PRIMARY, false);
+            graphics.fill(timeLeft, timeAxisTop, timeLeft + timeWidth, bottom, TradingPalette.DIVIDER);
+            graphics.text(font, time, timeLeft + 3, timeAxisTop + 1, TradingPalette.TEXT_PRIMARY, false);
         }
         extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale);
         extractLegend(graphics, left, top, right, legendHeight, candles, ma, hovered < 0 ? candles.size() - 1 : hovered);
@@ -143,15 +143,15 @@ final class KlineChart {
             int mainTop, int mainHeight, int volumeTop, int volumeBottom, PriceScale scale, int lastPriceY) {
         for (int line = 0; line <= GRID_LINES; line++) {
             int y = mainTop + line * (mainHeight - 1) / GRID_LINES;
-            graphics.horizontalLine(left, plotRight, y, BinancePalette.GRID);
+            graphics.horizontalLine(left, plotRight, y, TradingPalette.GRID);
             int labelTop = Math.max(mainTop, Math.min(y - font.lineHeight / 2, mainTop + mainHeight - font.lineHeight));
             if (Math.abs(labelTop + font.lineHeight / 2 - lastPriceY) <= font.lineHeight) {
                 continue;
             }
-            graphics.text(font, MarketFormat.price(scale.priceAt(y)), axisLeft + 2, labelTop, BinancePalette.TEXT_SECONDARY, false);
+            graphics.text(font, MarketFormat.price(scale.priceAt(y)), axisLeft + 2, labelTop, TradingPalette.TEXT_SECONDARY, false);
         }
-        graphics.horizontalLine(left, plotRight, volumeTop - 1, BinancePalette.GRID);
-        graphics.horizontalLine(left, plotRight, volumeBottom, BinancePalette.GRID);
+        graphics.horizontalLine(left, plotRight, volumeTop - 1, TradingPalette.GRID);
+        graphics.horizontalLine(left, plotRight, volumeBottom, TradingPalette.GRID);
     }
 
     /** 时间轴：在固定间隔的 K 线下标注市场时间，并画一条竖向网格线。 */
@@ -171,8 +171,8 @@ final class KlineChart {
             if (labelX < Math.max(left, lastLabelEnd + 4) || labelX + labelWidth > right) {
                 continue;
             }
-            graphics.verticalLine(centerX, mainTop, volumeBottom, BinancePalette.GRID);
-            graphics.text(font, label, labelX, timeAxisTop + 1, BinancePalette.TEXT_SECONDARY, false);
+            graphics.verticalLine(centerX, mainTop, volumeBottom, TradingPalette.GRID);
+            graphics.text(font, label, labelX, timeAxisTop + 1, TradingPalette.TEXT_SECONDARY, false);
             lastLabelEnd = labelX + labelWidth;
         }
     }
@@ -214,18 +214,18 @@ final class KlineChart {
         }
         graphics.fill(axisLeft, y - font.lineHeight / 2 - 1, right, y + font.lineHeight / 2 + 1, color);
         graphics.text(font, MarketFormat.price(latest.close()), axisLeft + 2, y - font.lineHeight / 2,
-                BinancePalette.TEXT_PRIMARY, false);
+                TradingPalette.TEXT_PRIMARY, false);
     }
 
     private void extractCrosshair(GuiGraphicsExtractor graphics, int left, int plotRight, int axisLeft, int right,
             int mainTop, int mainHeight, int volumeBottom, int centerX, int mouseY, PriceScale scale) {
-        graphics.verticalLine(centerX, mainTop, volumeBottom - 1, BinancePalette.CROSSHAIR);
+        graphics.verticalLine(centerX, mainTop, volumeBottom - 1, TradingPalette.CROSSHAIR);
         if (mouseY < mainTop + mainHeight) {
-            graphics.horizontalLine(left, plotRight, mouseY, BinancePalette.CROSSHAIR);
+            graphics.horizontalLine(left, plotRight, mouseY, TradingPalette.CROSSHAIR);
             graphics.fill(axisLeft, mouseY - font.lineHeight / 2 - 1, right, mouseY + font.lineHeight / 2 + 1,
-                    BinancePalette.DIVIDER);
+                    TradingPalette.DIVIDER);
             graphics.text(font, MarketFormat.price(scale.priceAt(mouseY)), axisLeft + 2, mouseY - font.lineHeight / 2,
-                    BinancePalette.TEXT_PRIMARY, false);
+                    TradingPalette.TEXT_PRIMARY, false);
         }
     }
 
@@ -266,14 +266,14 @@ final class KlineChart {
         if (end > right) {
             return Integer.MAX_VALUE / 2;
         }
-        graphics.text(font, label, x, y, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, label, x, y, TradingPalette.TEXT_SECONDARY, false);
         graphics.text(font, value, valueX, y, color, false);
         return end + LEGEND_GAP;
     }
 
     /** 收盘不低于开盘为涨，否则为跌（颜色按涨跌色方案）；正在走的那根按当前价格相对开盘算。 */
     private static int directionColor(Candle candle) {
-        return candle.close() >= candle.open() ? BinancePalette.up() : BinancePalette.down();
+        return candle.close() >= candle.open() ? TradingPalette.up() : TradingPalette.down();
     }
 
     /** 时间轴上每隔多少根 K 线标一次，按绝对序号对齐，所以新 K 线出现时标注不会跟着滚动。 */

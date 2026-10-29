@@ -6,8 +6,8 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.common.TranslatableEnum;
 
 /**
- * 涨跌色方案：绿涨红跌（币安默认）或红涨绿跌（A 股习惯）。只决定「涨 / 买 / 多 / 盈利」与「跌 / 卖 / 空 / 亏损」用哪种颜色，
- * 品牌黄、中性灰等其他配色不受影响。界面上所有带涨跌语义的颜色都经 {@link BinancePalette#up()} / {@link BinancePalette#down()} 取色。
+ * 涨跌色方案：绿涨红跌（默认）或红涨绿跌（A 股习惯）。只决定「涨 / 买 / 多 / 盈利」与「跌 / 卖 / 空 / 亏损」用哪种颜色，
+ * 品牌黄、中性灰等其他配色不受影响。界面上所有带涨跌语义的颜色都经 {@link TradingPalette#up()} / {@link TradingPalette#down()} 取色。
  * <p>
  * 翻译键按常量名拼接：界面按钮 {@code screen.creepercapital.trading.color_scheme.<小写名>}，
  * 配置界面 {@code creepercapital.configuration.colorScheme.<小写名>}（语言文件检查按同样规则展开）。
@@ -23,11 +23,11 @@ public enum ColorScheme implements TranslatableEnum {
     }
 
     int up() {
-        return redUp ? BinancePalette.RED : BinancePalette.GREEN;
+        return redUp ? TradingPalette.RED : TradingPalette.GREEN;
     }
 
     int down() {
-        return redUp ? BinancePalette.GREEN : BinancePalette.RED;
+        return redUp ? TradingPalette.GREEN : TradingPalette.RED;
     }
 
     ColorScheme toggled() {

@@ -25,7 +25,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 
 /**
- * 下单面板（币安下单区）：顶部切换「市价」「限价」，右侧点一下切逐仓 / 全仓，选杠杆、填数量（限价还要填委托价），
+ * 下单面板：顶部切换「市价」「限价」，右侧点一下切逐仓 / 全仓，选杠杆、填数量（限价还要填委托价），
  * 点「开多」「开空」开仓，或点「平仓」平掉当前合约的仓位（市价立即平，限价则挂只减仓限价单）。限价单挂在服务端，价格穿越委托价才成交，挂单期间冻结保证金。
  * <p>
  * 数量下方有「预估」「止盈止损」两页：预估页是可用余额与预估成交价、保证金、手续费；止盈止损页填止盈价、止损价，选触发价来源
@@ -45,10 +45,10 @@ final class OrderPanel {
     private static final int BUTTON_HEIGHT = 18;
     private static final int STEP_BUTTON = 14;
     private static final int INPUT_HEIGHT = 16;
-    private static final int BUTTON_BACKGROUND = BinancePalette.BUTTON;
-    private static final int BUTTON_HOVER = BinancePalette.BUTTON_HOVER;
-    private static final int INPUT_BACKGROUND = BinancePalette.BACKGROUND;
-    private static final int DISABLED = BinancePalette.DISABLED;
+    private static final int BUTTON_BACKGROUND = TradingPalette.BUTTON;
+    private static final int BUTTON_HOVER = TradingPalette.BUTTON_HOVER;
+    private static final int INPUT_BACKGROUND = TradingPalette.BACKGROUND;
+    private static final int DISABLED = TradingPalette.DISABLED;
     /** 面板底部的账户概况：标题加三行（钱包余额、未实现盈亏、保证金余额）。 */
     private static final int ACCOUNT_HEIGHT = ROW * 4 + 4;
 
@@ -146,7 +146,7 @@ final class OrderPanel {
 
     void extract(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, String symbol, @Nullable MarketSnapshot snapshot,
             int mouseX, int mouseY, float partialTick) {
-        graphics.fill(left, top, right, bottom, BinancePalette.PANEL);
+        graphics.fill(left, top, right, bottom, TradingPalette.PANEL);
         TradingParams params = ClientTrading.params(symbol).orElse(null);
         Position position = ClientTrading.position(symbol).orElse(null);
         int x = left + PAD;
@@ -174,12 +174,12 @@ final class OrderPanel {
         modeBox = new int[] {right - PAD - modeWidth, y - 2, right - PAD, tabBottom};
         graphics.fill(modeBox[0], modeBox[1], modeBox[2], modeBox[3],
                 inside(modeBox, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
-        graphics.centeredText(font, modeLabel, (modeBox[0] + modeBox[2]) / 2, y + 1, BinancePalette.TEXT_PRIMARY);
+        graphics.centeredText(font, modeLabel, (modeBox[0] + modeBox[2]) / 2, y + 1, TradingPalette.TEXT_PRIMARY);
         y += ROW + 2;
 
         // 杠杆：「−」「倍数」「+」，有仓位时直接调整仓位的杠杆（受当前档位上限和可用保证金约束，由服务端校验）
         int leverage = ClientTrading.leverage(symbol);
-        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.leverage"), x, y + 3, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.leverage"), x, y + 3, TradingPalette.TEXT_SECONDARY, false);
         String leverageText = leverage + "x";
         int plusLeft = right - PAD - STEP_BUTTON;
         int textRight = plusLeft - 4;
@@ -188,16 +188,16 @@ final class OrderPanel {
         plus = new int[] {plusLeft, y, plusLeft + STEP_BUTTON, y + STEP_BUTTON};
         stepButton(graphics, minus, "−", leverage > 1, mouseX, mouseY);
         stepButton(graphics, plus, "+", params != null && leverage < params.maxLeverage(), mouseX, mouseY);
-        graphics.centeredText(font, leverageText, (minus[2] + plus[0]) / 2, y + 3, BinancePalette.TEXT_PRIMARY);
+        graphics.centeredText(font, leverageText, (minus[2] + plus[0]) / 2, y + 3, TradingPalette.TEXT_PRIMARY);
         y += STEP_BUTTON + 4;
 
         // 委托价（限价）：输入框右侧标出 CRP 作单位
         if (limit) {
             graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
-            graphics.outline(x, y, width, INPUT_HEIGHT, priceBox.isFocused() ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
+            graphics.outline(x, y, width, INPUT_HEIGHT, priceBox.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
             int crpWidth = font.width("CRP");
             graphics.text(font, "CRP", x + width - 4 - crpWidth, y + (INPUT_HEIGHT - font.lineHeight) / 2 + 1,
-                    BinancePalette.TEXT_SECONDARY, false);
+                    TradingPalette.TEXT_SECONDARY, false);
             priceBox.setWidth(width - 12 - crpWidth);
             priceBox.setX(x + 4);
             priceBox.setY(y + 4);
@@ -208,10 +208,10 @@ final class OrderPanel {
         // 数量：输入框右侧标出标的资源的名称作单位
         String unit = underlyingName(symbol);
         graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
-        graphics.outline(x, y, width, INPUT_HEIGHT, quantityBox.isFocused() ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
+        graphics.outline(x, y, width, INPUT_HEIGHT, quantityBox.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
         int unitWidth = font.width(unit);
         graphics.text(font, unit, x + width - 4 - unitWidth, y + (INPUT_HEIGHT - font.lineHeight) / 2 + 1,
-                BinancePalette.TEXT_SECONDARY, false);
+                TradingPalette.TEXT_SECONDARY, false);
         quantityBox.setWidth(width - 12 - unitWidth);
         quantityBox.setX(x + 4);
         quantityBox.setY(y + 4);
@@ -243,7 +243,7 @@ final class OrderPanel {
                             ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
                     Quantities.format(position.lots(), position.quantityDecimals()), position.leverage());
             String text = GuiText.fit(font, held.getString(), right - PAD - protectionTab[2] - 4);
-            graphics.text(font, text, right - PAD - font.width(text), y, BinancePalette.side(position.side() == Side.LONG), false);
+            graphics.text(font, text, right - PAD - font.width(text), y, TradingPalette.side(position.side() == Side.LONG), false);
         }
         y += ROW + 3;
         OptionalLong lots = params == null ? OptionalLong.empty() : Quantities.parseLots(quantityBox.getValue(), params.quantityDecimals());
@@ -259,7 +259,7 @@ final class OrderPanel {
                     Component.translatable(position.side() == Side.LONG
                             ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
                     Quantities.format(position.lots(), position.quantityDecimals()), position.leverage());
-            graphics.text(font, GuiText.fit(font, held.getString(), width), x, y, BinancePalette.side(position.side() == Side.LONG), false);
+            graphics.text(font, GuiText.fit(font, held.getString(), width), x, y, TradingPalette.side(position.side() == Side.LONG), false);
             y += ROW - 1;
         }
         y += 1;
@@ -269,8 +269,8 @@ final class OrderPanel {
         int half = (width - gap) / 2;
         buyBox = new int[] {x, y, x + half, y + BUTTON_HEIGHT};
         sellBox = new int[] {x + half + gap, y, x + width, y + BUTTON_HEIGHT};
-        colorButton(graphics, buyBox, Component.translatable("screen.creepercapital.trading.order.buy"), BinancePalette.up(), mouseX, mouseY);
-        colorButton(graphics, sellBox, Component.translatable("screen.creepercapital.trading.order.sell"), BinancePalette.down(), mouseX, mouseY);
+        colorButton(graphics, buyBox, Component.translatable("screen.creepercapital.trading.order.buy"), TradingPalette.up(), mouseX, mouseY);
+        colorButton(graphics, sellBox, Component.translatable("screen.creepercapital.trading.order.sell"), TradingPalette.down(), mouseX, mouseY);
         y += BUTTON_HEIGHT + 4;
         boolean canClose = position != null;
         // 有仓位时，平仓行分成「平仓」和「设止盈止损」两个按钮
@@ -296,7 +296,7 @@ final class OrderPanel {
         // 下单结果：成功是主文字色（只是告知），失败是错误红（与涨跌色方案无关）
         ClientTrading.Message message = ClientTrading.lastResult();
         if (message != null) {
-            int color = message.success() ? BinancePalette.TEXT_PRIMARY : BinancePalette.ERROR;
+            int color = message.success() ? TradingPalette.TEXT_PRIMARY : TradingPalette.ERROR;
             int limitY = account ? accountTop - 4 : bottom - 3;
             // 只画面板放得下的行，免得长消息越出面板底部或压到账户概况
             for (FormattedCharSequence line : font.split(message.text(), width)) {
@@ -311,19 +311,19 @@ final class OrderPanel {
 
     /** 账户概况：分隔线、标题，然后钱包余额、未实现盈亏（按正负着涨跌色）、保证金余额。 */
     private void extractAccount(GuiGraphicsExtractor graphics, int x, int right, int top) {
-        graphics.horizontalLine(x, right - 1, top, BinancePalette.DIVIDER);
+        graphics.horizontalLine(x, right - 1, top, TradingPalette.DIVIDER);
         int y = top + 5;
-        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.account"), x, y, BinancePalette.TEXT_PRIMARY, false);
+        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.account"), x, y, TradingPalette.TEXT_PRIMARY, false);
         y += ROW;
         Assets assets = ClientAccount.assets();
         infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.wallet",
-                MarketFormat.money(assets.walletBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
+                MarketFormat.money(assets.walletBalance()) + " CRP", TradingPalette.TEXT_PRIMARY);
         y += ROW - 1;
         infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.unrealized_pnl",
-                MarketFormat.signedMoney(assets.unrealizedPnl()) + " CRP", BinancePalette.signed(assets.unrealizedPnl().units()));
+                MarketFormat.signedMoney(assets.unrealizedPnl()) + " CRP", TradingPalette.signed(assets.unrealizedPnl().units()));
         y += ROW - 1;
         infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.margin_balance",
-                MarketFormat.money(assets.marginBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
+                MarketFormat.money(assets.marginBalance()) + " CRP", TradingPalette.TEXT_PRIMARY);
     }
 
     /**
@@ -334,7 +334,7 @@ final class OrderPanel {
     private int extractInfo(GuiGraphicsExtractor graphics, int x, int right, int y, @Nullable TradingParams params,
             @Nullable MarketSnapshot snapshot, OptionalLong lots, int leverage, OptionalDouble limitPrice, boolean limit) {
         infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.available",
-                MarketFormat.money(ClientAccount.assets().availableBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
+                MarketFormat.money(ClientAccount.assets().availableBalance()) + " CRP", TradingPalette.TEXT_PRIMARY);
         y += ROW - 1;
         String margin = "--";
         String fee = "--";
@@ -351,18 +351,18 @@ final class OrderPanel {
             Optional<OpenEstimate> sell = estimate(params, snapshot, Side.SHORT, lots, leverage);
             infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.price_long",
                     buy.map(estimate -> MarketFormat.price(estimate.price())).orElse("--"),
-                    buy.isPresent() ? BinancePalette.up() : BinancePalette.TEXT_PRIMARY);
+                    buy.isPresent() ? TradingPalette.up() : TradingPalette.TEXT_PRIMARY);
             y += ROW - 1;
             infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.price_short",
                     sell.map(estimate -> MarketFormat.price(estimate.price())).orElse("--"),
-                    sell.isPresent() ? BinancePalette.down() : BinancePalette.TEXT_PRIMARY);
+                    sell.isPresent() ? TradingPalette.down() : TradingPalette.TEXT_PRIMARY);
             y += ROW - 1;
             margin = buy.map(estimate -> MarketFormat.money(estimate.margin()) + " CRP").orElse("--");
             fee = buy.map(estimate -> MarketFormat.fee(estimate.fee()) + " CRP").orElse("--");
         }
-        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.margin", margin, BinancePalette.TEXT_PRIMARY);
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.margin", margin, TradingPalette.TEXT_PRIMARY);
         y += ROW - 1;
-        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.fee", fee, BinancePalette.TEXT_PRIMARY);
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.fee", fee, TradingPalette.TEXT_PRIMARY);
         return y + ROW - 1;
     }
 
@@ -393,19 +393,19 @@ final class OrderPanel {
                 inside(reduceBox, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
         // 复选框：方框，勾选时里面填黄色
         int boxTop = reduceBox[1] + (STEP_BUTTON - 8) / 2;
-        graphics.outline(reduceBox[0] + 3, boxTop, 8, 8, reduce ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_SECONDARY);
+        graphics.outline(reduceBox[0] + 3, boxTop, 8, 8, reduce ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_SECONDARY);
         if (reduce) {
-            graphics.fill(reduceBox[0] + 5, boxTop + 2, reduceBox[0] + 9, boxTop + 6, BinancePalette.BRAND_YELLOW);
+            graphics.fill(reduceBox[0] + 5, boxTop + 2, reduceBox[0] + 9, boxTop + 6, TradingPalette.BRAND_YELLOW);
         }
         graphics.text(font, Component.translatable("screen.creepercapital.trading.order.reduce_only"), reduceBox[0] + 14,
-                reduceBox[1] + (STEP_BUTTON - font.lineHeight) / 2 + 1, BinancePalette.TEXT_PRIMARY, false);
+                reduceBox[1] + (STEP_BUTTON - font.lineHeight) / 2 + 1, TradingPalette.TEXT_PRIMARY, false);
         return y + STEP_BUTTON + 3;
     }
 
     private void triggerField(GuiGraphicsExtractor graphics, EditBox box, int x, int y, int width, int mouseX, int mouseY,
             float partialTick) {
         graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
-        graphics.outline(x, y, width, INPUT_HEIGHT, box.isFocused() ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
+        graphics.outline(x, y, width, INPUT_HEIGHT, box.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
         box.setWidth(width - 8);
         box.setX(x + 4);
         box.setY(y + 4);
@@ -416,20 +416,20 @@ final class OrderPanel {
     private Component protectionLabel() {
         Component label = Component.translatable("screen.creepercapital.trading.order.tab.protection");
         boolean set = !takeProfitBox.getValue().isEmpty() || !stopLossBox.getValue().isEmpty() || ClientTrading.reduceOnly();
-        return set ? label.copy().append(Component.literal(" *").withColor(BinancePalette.BRAND_YELLOW)) : label;
+        return set ? label.copy().append(Component.literal(" *").withColor(TradingPalette.BRAND_YELLOW)) : label;
     }
 
     private void plainButton(GuiGraphicsExtractor graphics, int[] box, Component label, boolean enabled, int mouseX, int mouseY) {
         graphics.fill(box[0], box[1], box[2], box[3], enabled && inside(box, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
         graphics.centeredText(font, label, (box[0] + box[2]) / 2, box[1] + (box[3] - box[1] - font.lineHeight) / 2 + 1,
-                enabled ? BinancePalette.TEXT_PRIMARY : DISABLED);
+                enabled ? TradingPalette.TEXT_PRIMARY : DISABLED);
     }
 
     /** 一行「名称 ……… 数值」：数值靠右完整显示，名称放不下时截断。 */
     private void infoRow(GuiGraphicsExtractor graphics, int x, int right, int y, String labelKey, String value, int valueColor) {
         int valueWidth = font.width(value);
         String label = GuiText.fit(font, Component.translatable(labelKey).getString(), right - x - valueWidth - 4);
-        graphics.text(font, label, x, y, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, label, x, y, TradingPalette.TEXT_SECONDARY, false);
         graphics.text(font, value, right - valueWidth, y, valueColor, false);
     }
 
@@ -443,10 +443,10 @@ final class OrderPanel {
         if (hovered && !selected) {
             graphics.fill(box[0], box[1], box[2], box[3], BUTTON_BACKGROUND);
         }
-        graphics.text(font, label, box[0] + 6, box[1] + 2, selected ? BinancePalette.BRAND_YELLOW
-                : hovered ? BinancePalette.TEXT_PRIMARY : BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, label, box[0] + 6, box[1] + 2, selected ? TradingPalette.BRAND_YELLOW
+                : hovered ? TradingPalette.TEXT_PRIMARY : TradingPalette.TEXT_SECONDARY, false);
         if (selected) {
-            graphics.horizontalLine(box[0] + 6, box[2] - 7, box[3] - 1, BinancePalette.BRAND_YELLOW);
+            graphics.horizontalLine(box[0] + 6, box[2] - 7, box[3] - 1, TradingPalette.BRAND_YELLOW);
         }
     }
 
@@ -467,7 +467,7 @@ final class OrderPanel {
     private void stepButton(GuiGraphicsExtractor graphics, int[] box, String label, boolean enabled, int mouseX, int mouseY) {
         graphics.fill(box[0], box[1], box[2], box[3], enabled && inside(box, mouseX, mouseY) ? BUTTON_HOVER : BUTTON_BACKGROUND);
         graphics.centeredText(font, label, (box[0] + box[2]) / 2, box[1] + (box[3] - box[1] - font.lineHeight) / 2 + 1,
-                enabled ? BinancePalette.TEXT_PRIMARY : DISABLED);
+                enabled ? TradingPalette.TEXT_PRIMARY : DISABLED);
     }
 
     private void colorButton(GuiGraphicsExtractor graphics, int[] box, Component label, int color, int mouseX, int mouseY) {

@@ -11,7 +11,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * 盘口页（币安样式）：卖盘在上（跌色）、买盘在下（涨色），中间是最新价格（右侧灰字是标记价格）；每档三列，价格、数量、累计数量，
+ * 盘口页：卖盘在上（跌色）、买盘在下（涨色），中间是最新价格（右侧灰字是标记价格）；每档三列，价格、数量、累计数量，
  * 背景有按累计数量画的深度条。档数随可用高度增减（最多 {@link #MAX_LEVELS} 档）。
  * <p>
  * 盘口就是虚拟流动性曲线（{@link LiquidityCurve}）的前若干档：用同步下来的合约深度参数和当前最新价格在本地算，
@@ -35,7 +35,7 @@ final class OrderBookPage {
     void extract(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, String symbol, MarketSnapshot snapshot) {
         TradingParams params = ClientTrading.params(symbol).orElse(null);
         if (params == null) {
-            graphics.centeredText(font, "--", (left + right) / 2, top + 20, BinancePalette.TEXT_SECONDARY);
+            graphics.centeredText(font, "--", (left + right) / 2, top + 20, TradingPalette.TEXT_SECONDARY);
             return;
         }
         int levels = Math.max(1, Math.min(MAX_LEVELS, (bottom - top - HEADER_HEIGHT - LAST_PRICE_HEIGHT - 2) / (ROW * 2)));
@@ -54,32 +54,32 @@ final class OrderBookPage {
 
         int y = top + 2;
         Component price = Component.translatable("screen.creepercapital.trading.book.price");
-        graphics.text(font, price, innerLeft, y, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, price, innerLeft, y, TradingPalette.TEXT_SECONDARY, false);
         drawRight(graphics, Component.translatable("screen.creepercapital.trading.book.quantity"), quantityRight, y,
-                BinancePalette.TEXT_SECONDARY);
-        drawRight(graphics, totalHeader, totalRight, y, BinancePalette.TEXT_SECONDARY);
+                TradingPalette.TEXT_SECONDARY);
+        drawRight(graphics, totalHeader, totalRight, y, TradingPalette.TEXT_SECONDARY);
         y += HEADER_HEIGHT;
 
         // 卖盘：离最新价格最近的一档（卖一）在最下面，所以从最远的一档往下画
         for (int i = levels - 1; i >= 0; i--) {
             extractLevel(graphics, asks.get(i), (i + 1) * curve.levelLots(), totalLots, decimals, innerLeft, innerRight, quantityRight,
-                    y, BinancePalette.down());
+                    y, TradingPalette.down());
             y += ROW;
         }
 
         // 中间是最新价格，颜色跟随相对上一个行情步的涨跌
-        graphics.horizontalLine(left, right - 1, y, BinancePalette.DIVIDER);
+        graphics.horizontalLine(left, right - 1, y, TradingPalette.DIVIDER);
         int midY = GuiText.centeredY(font, y, y + LAST_PRICE_HEIGHT);
         graphics.text(font, MarketFormat.price(snapshot.lastPrice()), innerLeft, midY,
-                BinancePalette.direction(ClientMarket.lastPriceDirection()), false);
-        drawRight(graphics, MarketFormat.price(snapshot.markPrice()), innerRight, midY, BinancePalette.TEXT_SECONDARY);
-        graphics.horizontalLine(left, right - 1, y + LAST_PRICE_HEIGHT, BinancePalette.DIVIDER);
+                TradingPalette.direction(ClientMarket.lastPriceDirection()), false);
+        drawRight(graphics, MarketFormat.price(snapshot.markPrice()), innerRight, midY, TradingPalette.TEXT_SECONDARY);
+        graphics.horizontalLine(left, right - 1, y + LAST_PRICE_HEIGHT, TradingPalette.DIVIDER);
         y += LAST_PRICE_HEIGHT + 1;
 
         // 买盘：买一在最上面
         for (int i = 0; i < levels; i++) {
             extractLevel(graphics, bids.get(i), (i + 1) * curve.levelLots(), totalLots, decimals, innerLeft, innerRight, quantityRight,
-                    y, BinancePalette.up());
+                    y, TradingPalette.up());
             y += ROW;
         }
     }
@@ -87,11 +87,11 @@ final class OrderBookPage {
     private void extractLevel(GuiGraphicsExtractor graphics, LiquidityCurve.Level level, long cumulativeLots, long totalLots,
             int decimals, int innerLeft, int innerRight, int quantityRight, int y, int color) {
         int barWidth = (int) Math.round((innerRight - innerLeft) * (double) cumulativeLots / totalLots);
-        graphics.fill(innerRight - barWidth, y, innerRight + PAD, y + ROW, BinancePalette.withAlpha(color, BAR_ALPHA));
+        graphics.fill(innerRight - barWidth, y, innerRight + PAD, y + ROW, TradingPalette.withAlpha(color, BAR_ALPHA));
         int textY = y + (ROW - font.lineHeight) / 2 + 1;
         graphics.text(font, MarketFormat.price(level.price()), innerLeft, textY, color, false);
-        drawRight(graphics, Quantities.format(level.lots(), decimals), quantityRight, textY, BinancePalette.TEXT_PRIMARY);
-        drawRight(graphics, Quantities.format(cumulativeLots, decimals), innerRight, textY, BinancePalette.TEXT_PRIMARY);
+        drawRight(graphics, Quantities.format(level.lots(), decimals), quantityRight, textY, TradingPalette.TEXT_PRIMARY);
+        drawRight(graphics, Quantities.format(cumulativeLots, decimals), innerRight, textY, TradingPalette.TEXT_PRIMARY);
     }
 
     private void drawRight(GuiGraphicsExtractor graphics, String text, int right, int y, int color) {
