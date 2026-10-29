@@ -148,7 +148,12 @@ final class ScreenshotRunner {
             LOGGER.error("无法写入截图说明", e);
         }
         LOGGER.info("自动截图结束：{}，输出目录 {}", success ? "成功" : "失败", outputDir);
-        minecraft.stop();
+        if (success) {
+            minecraft.stop();
+        } else {
+            // 失败时以非零退出码结束，让 Gradle 命令也跟着失败
+            Runtime.getRuntime().halt(1);
+        }
     }
 
     /** 说明文件：编号、内容、预期效果，可直接随截图推送做人工评审。 */
