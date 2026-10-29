@@ -16,6 +16,8 @@
   "screen.creepercapital.trading.market_time": "市场时间",
   "screen.creepercapital.trading.market_time.value": "第 %s 日 %s",
   "screen.creepercapital.trading.kline.loading": "K 线加载中…",
+  "screen.creepercapital.trading.kline.edge_oldest": "已到最早的缓存 K 线",
+  "screen.creepercapital.trading.kline.edge_latest": "已是最新 K 线",
   "screen.creepercapital.trading.kline.volume": "成交量",
   "screen.creepercapital.trading.kline.axis_time": "第%s日 %s",
   "screen.creepercapital.trading.kline.axis_day": "第%s日",

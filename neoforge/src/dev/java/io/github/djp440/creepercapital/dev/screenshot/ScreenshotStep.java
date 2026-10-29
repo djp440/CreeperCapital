@@ -47,7 +47,15 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，盘口栏在「盘口」页（窄屏时图表卡片切到这一页）。 */
         ORDER_BOOK(minecraft -> TradingScreen.openWithOrderBook()),
         /** 交易界面，表格区切到资金费记录页。 */
-        FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", ""));
+        FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", "")),
+        /** 交易界面，图表放大到每根 K 线 14 像素，并往回看 120 根。 */
+        CHART_ZOOMED_IN(minecraft -> TradingScreen.openWithChartView(14, 120, 0)),
+        /** 交易界面，图表缩小到每根 K 线 2 像素（最新一根贴右）。 */
+        CHART_ZOOMED_OUT(minecraft -> TradingScreen.openWithChartView(2, 0, 0)),
+        /** 交易界面，图表缺省缩放、往回看 150 根。 */
+        CHART_PANNED(minecraft -> TradingScreen.openWithChartView(7, 150, 0)),
+        /** 交易界面，图表拖到缓存里最旧一根（往回看一个很大的数，被夹到边界），显示到头反馈。 */
+        CHART_AT_OLDEST(minecraft -> TradingScreen.openWithChartView(7, 1_000_000, 1));
 
         private final Consumer<Minecraft> opener;
 

@@ -163,6 +163,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，图表带着指定的缩放（每根 K 线的像素宽）和平移（往回看多少根）；{@code edgeSide} 非 0 时显示到头反馈。 */
+    public static void openWithChartView(double slotWidth, double offset, int edgeSide) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devSetView(new ChartViewport(slotWidth, offset), edgeSide);
+        }
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();
@@ -207,6 +215,9 @@ public final class TradingScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+        if (chart.mouseScrolled(x, y, scrollY)) {
+            return true;
+        }
         if (layout != null && layout.table().contains(x, y)) {
             tables.mouseScrolled(scrollY);
             return true;
@@ -227,6 +238,10 @@ public final class TradingScreen extends Screen {
                 dragRatios = layoutRatios();
                 return true;
             }
+        }
+        if (chart.mouseClicked(event.x(), event.y(), event.button(), doubleClick)) {
+            clearInputFocus();
+            return true;
         }
         if (event.button() == 0) {
             // 输入框按「画出来的区域」判定点击，且先于各处登记的点击区域，不会被它们抢走（#39）
@@ -260,6 +275,9 @@ public final class TradingScreen extends Screen {
     /** 拖拽边框：边框中心跟着鼠标，比例受各区域最小尺寸约束。 */
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+        if (event.button() == 0 && chart.isDragging()) {
+            return chart.mouseDragged(dx);
+        }
         if (draggingSeam != null && event.button() == 0) {
             dragRatios = TradingLayout.dragged(width, height, tickerRows, dragRatios, draggingSeam, event.x(), event.y());
             return true;
@@ -270,6 +288,9 @@ public final class TradingScreen extends Screen {
     /** 松开鼠标结束拖拽，把比例写回客户端配置。 */
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (chart.mouseReleased(event.button())) {
+            return true;
+        }
         if (draggingSeam != null && event.button() == 0) {
             TradingLayout.Ratios ratios = dragRatios;
             draggingSeam = null;
@@ -616,6 +637,7 @@ public final class TradingScreen extends Screen {
             }
             List<Candle> candles = ClientKlines.candles();
             if (candles == null || candles.isEmpty()) {
+                chart.forget();
                 graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.kline.loading"),
                         (card.left() + card.right()) / 2, GuiText.centeredY(font, contentTop, card.bottom()), TradingPalette.TEXT_SECONDARY);
             } else {
@@ -623,6 +645,7 @@ public final class TradingScreen extends Screen {
                         candles, mouseX, mouseY);
             }
         } else {
+            chart.forget();
             marketColumn.extractPage(graphics, card.left(), contentTop, card.right(), card.bottom(), snapshot.symbol(), snapshot);
         }
         graphics.disableScissor();

@@ -16,6 +16,8 @@
   "screen.creepercapital.trading.market_time": "Market Time",
   "screen.creepercapital.trading.market_time.value": "Day %s %s",
   "screen.creepercapital.trading.kline.loading": "Loading candles...",
+  "screen.creepercapital.trading.kline.edge_oldest": "Reached the earliest cached candle",
+  "screen.creepercapital.trading.kline.edge_latest": "Already at the latest candle",
   "screen.creepercapital.trading.kline.volume": "Vol",
   "screen.creepercapital.trading.kline.axis_time": "D%s %s",
   "screen.creepercapital.trading.kline.axis_day": "D%s",

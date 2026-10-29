@@ -3,6 +3,7 @@ package io.github.djp440.creepercapital.client;
 import java.util.List;
 import java.util.Locale;
 
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.kline.Indicators;
@@ -13,10 +14,12 @@ import net.minecraft.network.chat.Component;
 
 /**
  * K 线图（深色配色，涨跌色跟随 {@link ColorScheme}）：上方是蜡烛图加三条均线，下方是成交量柱，右侧是价格轴，底部是市场时间轴，
- * 最新一根贴着右边，往左依次是更早的 K 线。鼠标悬停某根时图例显示它的开高低收、成交量和均线值，时间轴上标出它的时间。
+ * 缺省最新一根贴着右边，往左依次是更早的 K 线。鼠标悬停某根时图例显示它的开高低收、成交量和均线值，时间轴上标出它的时间。
  * 图例逐项排，放不下的项不画；价格轴刻度避开最新价格标签，不与成交量刻度相碰。
  * <p>
- * 只负责把已有的 K 线画出来，不持有状态；放不下的更早的 K 线不画。
+ * 按住左键左右拖动平移、滚轮以鼠标为锚点缩放、双击回到「最新 + 缺省缩放」（视口见 {@link ChartViewport}，只在客户端已缓存的 K 线里移动）；
+ * 价格轴随可见区间自动缩放。拖到缓存的最旧 / 最新一根时，边缘泛出黄光并提示。
+ * 唯一持有的状态是视口、拖拽和到头反馈，K 线数据由调用方每帧传入。
  */
 final class KlineChart {
     private static final int[] MA_PERIODS = {7, 25, 99};
@@ -34,10 +37,142 @@ final class KlineChart {
     /** 成交量柱的半透明度，叠在网格上不抢眼。 */
     private static final int VOLUME_ALPHA = 0xB3000000;
 
+    /** 到头反馈（边缘黄光和提示）持续的毫秒数。 */
+    private static final long EDGE_FEEDBACK_MILLIS = 900;
+    private static final int EDGE_GLOW_WIDTH = 12;
+
     private final Font font;
+
+    private ChartViewport viewport = ChartViewport.latest();
+    /** 换了 K 线数据时复位到的视口；平时就是缺省，只有开发截图会改。 */
+    private ChartViewport home = ChartViewport.latest();
+    /** 视口对应的那份 K 线（换了合约 / 周期 / 重新拉取后是另一个对象，视口复位）。 */
+    private List<Candle> trackedCandles;
+    /** 上一帧最后一根的开始时间，用来发现追加了新 K 线（平移着看历史时保持不动）。 */
+    private long trackedLastStart;
+    /** 上一帧画出的绘图区（蜡烛 + 成交量，不含价格轴）；没画时为 null，鼠标事件据此判断。 */
+    private int plotLeft;
+    private int plotRight;
+    private int plotTop;
+    private int plotBottom;
+    private boolean plotValid;
+    private boolean dragging;
+    /** 最近一次拖到头的时刻与方向（1 = 到了最旧一根，-1 = 到了最新一根）。 */
+    private long edgeMillis = Long.MIN_VALUE / 2;
+    private int edgeSide;
+    /** 开发截图用：到头反馈固定显示，不随时间淡出。 */
+    private boolean edgeHold;
 
     KlineChart(Font font) {
         this.font = font;
+    }
+
+    // ===== 鼠标交互：由交易界面在点击 / 拖动 / 滚轮时调用 =====
+
+    private boolean inPlot(double x, double y) {
+        return plotValid && x >= plotLeft && x < plotRight && y >= plotTop && y < plotBottom;
+    }
+
+    /** 左键点在绘图区：开始拖动平移，双击复位。返回是否由图表处理。 */
+    boolean mouseClicked(double x, double y, int button, boolean doubleClick) {
+        if (button != 0 || !inPlot(x, y)) {
+            return false;
+        }
+        if (doubleClick) {
+            viewport = ChartViewport.latest();
+            dragging = false;
+        } else {
+            dragging = true;
+        }
+        return true;
+    }
+
+    boolean isDragging() {
+        return dragging;
+    }
+
+    /** 拖动 {@code dx} 像素（向右为正，回看更早）。到头时记下方向，下一帧起泛黄光提示。 */
+    boolean mouseDragged(double dx) {
+        if (!dragging || trackedCandles == null) {
+            return false;
+        }
+        int count = trackedCandles.size();
+        double width = plotRight - plotLeft;
+        double over = viewport.overscroll(dx, count, width);
+        viewport = viewport.panned(dx, count, width);
+        if (Math.abs(over) > 0.5) {
+            edgeSide = over > 0 ? 1 : -1;
+            edgeMillis = System.currentTimeMillis();
+        }
+        return true;
+    }
+
+    boolean mouseReleased(int button) {
+        if (button == 0 && dragging) {
+            dragging = false;
+            return true;
+        }
+        return false;
+    }
+
+    /** 滚轮在绘图区：以鼠标位置为锚点缩放（向上滚放大）。 */
+    boolean mouseScrolled(double x, double y, double scrollY) {
+        if (!inPlot(x, y) || trackedCandles == null || scrollY == 0) {
+            return false;
+        }
+        viewport = viewport.zoomed(scrollY, x, plotLeft, plotRight, trackedCandles.size());
+        return true;
+    }
+
+    /** 这一帧没画图表（切到了别的页、没有数据）：取消进行中的拖动，鼠标事件不再响应。 */
+    void forget() {
+        plotValid = false;
+        dragging = false;
+    }
+
+    /**
+     * 开发用（自动截图）：直接设置视口，等同于玩家缩放 / 拖动之后的状态（K 线数据重新到达时也回到它）；
+     * {@code edgeSide} 非 0 时把到头反馈固定在画面上（1 = 最旧一根，-1 = 最新一根）。
+     */
+    void devSetView(ChartViewport view, int edgeSide) {
+        this.home = view;
+        this.viewport = view;
+        this.edgeSide = edgeSide;
+        this.edgeHold = edgeSide != 0;
+    }
+
+    /** 换了 K 线数据就复位视口；追加了新 K 线时，回看着历史的视口跟着挪，让正在看的那几根不动。 */
+    private void sync(List<Candle> candles) {
+        if (candles != trackedCandles) {
+            viewport = home;
+        } else if (viewport.offset() > 0) {
+            long lastStart = candles.get(candles.size() - 1).start();
+            if (lastStart != trackedLastStart) {
+                int previous = indexOfStart(candles, trackedLastStart);
+                viewport = previous < 0 ? ChartViewport.latest()
+                        : new ChartViewport(viewport.slotWidth(), viewport.offset() + candles.size() - 1 - previous);
+            }
+        }
+        trackedCandles = candles;
+        trackedLastStart = candles.get(candles.size() - 1).start();
+    }
+
+    private static int indexOfStart(List<Candle> candles, long start) {
+        int low = 0;
+        int high = candles.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            long value = candles.get(middle).start();
+            if (value == start) {
+                return middle;
+            }
+            if (value < start) {
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -46,6 +181,7 @@ final class KlineChart {
      */
     void extract(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, CandlePeriod period,
             List<Candle> candles, int mouseX, int mouseY) {
+        plotValid = false;
         int legendHeight = font.lineHeight + 2;
         int timeAxisTop = bottom - font.lineHeight - 2;
         int mainTop = top + legendHeight * 2 + 2;
@@ -63,79 +199,110 @@ final class KlineChart {
         }
         int axisLeft = right - Math.max(MIN_AXIS_WIDTH, font.width(MarketFormat.price(widest)) + 6);
         int plotRight = axisLeft - 4;
-
-        int visible = Math.min(candles.size(), (plotRight - left) / SLOT);
-        int first = candles.size() - visible;
-        if (visible == 0) {
-            return; // 窗口窄到一根都放不下
+        if (plotRight - left < 1) {
+            return; // 窗口窄到绘图区没有宽度
         }
-        int slotsLeft = plotRight - visible * SLOT;
+
+        sync(candles);
+        viewport = viewport.clamped(candles.size(), plotRight - left);
+        ChartViewport.Projection view = viewport.project(left, plotRight, candles.size());
+        int first = view.firstVisible();
+        int last = view.lastVisible();
+        if (last < first) {
+            return;
+        }
+        this.plotLeft = left;
+        this.plotRight = plotRight;
+        this.plotTop = mainTop;
+        this.plotBottom = volumeBottom;
+        this.plotValid = true;
 
         double[][] ma = new double[MA_PERIODS.length][];
         for (int k = 0; k < MA_PERIODS.length; k++) {
             ma[k] = Indicators.movingAverage(candles, MA_PERIODS[k]);
         }
 
-        double high = Double.NEGATIVE_INFINITY;
-        double low = Double.POSITIVE_INFINITY;
         double maxVolume = 0;
-        for (int i = first; i < candles.size(); i++) {
-            Candle candle = candles.get(i);
-            high = Math.max(high, candle.high());
-            low = Math.min(low, candle.low());
-            maxVolume = Math.max(maxVolume, candle.volume());
-            for (double[] line : ma) {
-                if (!Double.isNaN(line[i])) {
-                    high = Math.max(high, line[i]);
-                    low = Math.min(low, line[i]);
-                }
-            }
+        for (int i = first; i <= last; i++) {
+            maxVolume = Math.max(maxVolume, candles.get(i).volume());
         }
-        double pad = high - low < 1e-9 ? Math.max(Math.abs(high) * 0.005, 0.01) : (high - low) * 0.08;
-        high += pad;
-        low -= pad;
-        PriceScale scale = new PriceScale(mainTop, mainHeight, high, low);
+        PriceScale scale = PriceScale.fit(mainTop, mainHeight, candles, first, last, false, List.of(ma));
 
-        int lastPriceY = scale.y(candles.get(candles.size() - 1).close());
+        int lastPriceY = lastPriceLabelY(scale, scale.y(candles.get(candles.size() - 1).close()));
         extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeTop, volumeBottom, scale, lastPriceY);
-        extractTimeAxis(graphics, period, candles, left, first, visible, slotsLeft, right, mainTop, volumeBottom, timeAxisTop);
+        extractTimeAxis(graphics, period, candles, left, view, right, mainTop, volumeBottom, timeAxisTop);
 
-        for (int j = 0; j < visible; j++) {
-            Candle candle = candles.get(first + j);
-            int slotLeft = slotsLeft + j * SLOT;
+        // 缩放 / 平移时最左、最右的 K 线只露出一部分：裁在绘图区之内
+        graphics.enableScissor(left, mainTop - 1, plotRight, volumeBottom + 1);
+        int bodyWidth = Math.max(1, (int) Math.round(view.slotWidth() * BODY / SLOT));
+        for (int i = first; i <= last; i++) {
+            Candle candle = candles.get(i);
             int color = directionColor(candle);
-            int wickX = slotLeft + SLOT / 2;
+            int wickX = (int) Math.floor(view.centerX(i));
+            int bodyLeft = wickX - bodyWidth / 2;
             graphics.fill(wickX, scale.y(candle.high()), wickX + 1, scale.y(candle.low()) + 1, color);
             int bodyTop = scale.y(Math.max(candle.open(), candle.close()));
             int bodyBottom = Math.max(bodyTop + 1, scale.y(Math.min(candle.open(), candle.close())) + 1);
-            graphics.fill(slotLeft + (SLOT - BODY) / 2, bodyTop, slotLeft + (SLOT - BODY) / 2 + BODY, bodyBottom, color);
+            graphics.fill(bodyLeft, bodyTop, bodyLeft + bodyWidth, bodyBottom, color);
 
             if (maxVolume > 0) {
                 int barHeight = Math.max(1, (int) Math.round(candle.volume() / maxVolume * (volumeHeight - 1)));
-                graphics.fill(slotLeft + (SLOT - BODY) / 2, volumeBottom - barHeight,
-                        slotLeft + (SLOT - BODY) / 2 + BODY, volumeBottom, (color & 0x00FFFFFF) | VOLUME_ALPHA);
+                graphics.fill(bodyLeft, volumeBottom - barHeight, bodyLeft + bodyWidth, volumeBottom,
+                        (color & 0x00FFFFFF) | VOLUME_ALPHA);
             }
         }
-        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, TradingPalette.TEXT_SECONDARY, false);
-
         for (int k = 0; k < MA_PERIODS.length; k++) {
-            extractAverage(graphics, ma[k], first, visible, slotsLeft, scale, MA_COLORS[k]);
+            extractAverage(graphics, ma[k], first, last, view, scale, MA_COLORS[k]);
+        }
+        graphics.disableScissor();
+        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, TradingPalette.TEXT_SECONDARY, false);
+        extractEdgeFeedback(graphics, left, plotRight, mainTop, mainHeight);
+        if (dragging) {
+            graphics.requestCursor(CursorTypes.RESIZE_EW);
         }
 
         // 十字线先画，最新价格标签后画：两个价格标签重叠时，最新价格盖在上面
-        int hovered = -1;
-        if (mouseX >= slotsLeft && mouseX < plotRight && mouseY >= mainTop && mouseY < volumeBottom) {
-            hovered = first + (mouseX - slotsLeft) / SLOT;
-            int centerX = slotsLeft + (hovered - first) * SLOT + SLOT / 2;
+        int hovered = dragging ? -1 : view.candleAt(mouseX);
+        if (hovered >= 0 && mouseY >= mainTop && mouseY < volumeBottom) {
+            int centerX = (int) Math.floor(view.centerX(hovered));
             extractCrosshair(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeBottom, centerX, mouseY, scale);
             String time = MarketFormat.marketTime(new MarketTime(candles.get(hovered).start()));
             int timeWidth = font.width(time) + 6;
             int timeLeft = Math.max(left, Math.min(centerX - timeWidth / 2, plotRight - timeWidth));
             graphics.fill(timeLeft, timeAxisTop, timeLeft + timeWidth, bottom, TradingPalette.DIVIDER);
             graphics.text(font, time, timeLeft + 3, timeAxisTop + 1, TradingPalette.TEXT_PRIMARY, false);
+        } else {
+            hovered = -1;
         }
         extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale);
-        extractLegend(graphics, left, top, right, legendHeight, candles, ma, hovered < 0 ? candles.size() - 1 : hovered);
+        extractLegend(graphics, left, top, right, legendHeight, candles, ma, hovered < 0 ? last : hovered);
+    }
+
+    /** 拖到缓存边缘的反馈：那一侧泛一层渐隐的黄光，并提示没有更多了。 */
+    private void extractEdgeFeedback(GuiGraphicsExtractor graphics, int left, int plotRight, int mainTop, int mainHeight) {
+        long age = edgeHold ? EDGE_FEEDBACK_MILLIS / 4 : System.currentTimeMillis() - edgeMillis;
+        if (age < 0 || age >= EDGE_FEEDBACK_MILLIS) {
+            return;
+        }
+        int alpha = (int) (0x80 * (1 - (double) age / EDGE_FEEDBACK_MILLIS));
+        int bottom = mainTop + mainHeight;
+        Component text = Component.translatable(edgeSide > 0 ? "screen.creepercapital.trading.kline.edge_oldest"
+                : "screen.creepercapital.trading.kline.edge_latest");
+        int textWidth = font.width(text) + 8;
+        int textLeft;
+        // 横向渐隐：一列一列填，越靠近边缘越亮
+        for (int column = 0; column < EDGE_GLOW_WIDTH; column++) {
+            int color = TradingPalette.withAlpha(TradingPalette.BRAND_YELLOW, alpha * (EDGE_GLOW_WIDTH - column) / EDGE_GLOW_WIDTH);
+            int x = edgeSide > 0 ? left + column : plotRight - 1 - column;
+            graphics.fill(x, mainTop, x + 1, bottom, color);
+        }
+        if (edgeSide > 0) {
+            textLeft = left + EDGE_GLOW_WIDTH;
+        } else {
+            textLeft = plotRight - EDGE_GLOW_WIDTH - textWidth;
+        }
+        graphics.fill(textLeft, mainTop + 3, textLeft + textWidth, mainTop + 5 + font.lineHeight, TradingPalette.DIVIDER);
+        graphics.text(font, text, textLeft + 4, mainTop + 4, TradingPalette.BRAND_YELLOW, false);
     }
 
     /** 网格线与价格轴刻度：刻度文字不出主图区域，离最新价格标签太近的刻度不画（免得叠在一起）。 */
@@ -154,44 +321,53 @@ final class KlineChart {
         graphics.horizontalLine(left, plotRight, volumeBottom, TradingPalette.GRID);
     }
 
-    /** 时间轴：在固定间隔的 K 线下标注市场时间，并画一条竖向网格线。 */
+    /**
+     * 时间轴：在固定间隔的 K 线下标注市场时间，并画一条竖向网格线。间隔按绝对序号对齐（平移时标注不会跟着滚动），
+     * 缩放后 K 线挤得太密时间隔成倍加大，让相邻标注至少隔一个标注宽度。
+     */
     private void extractTimeAxis(GuiGraphicsExtractor graphics, CandlePeriod period, List<Candle> candles, int left,
-            int first, int visible, int slotsLeft, int right, int mainTop, int volumeBottom, int timeAxisTop) {
+            ChartViewport.Projection view, int right, int mainTop, int volumeBottom, int timeAxisTop) {
+        int first = view.firstVisible();
+        int last = view.lastVisible();
         int labelEvery = labelEvery(period);
+        int labelWidth = font.width(timeLabel(period, candles.get(first).start())) + 10;
+        while (labelEvery * view.slotWidth() < labelWidth) {
+            labelEvery *= 2;
+        }
         int lastLabelEnd = Integer.MIN_VALUE;
-        for (int j = 0; j < visible; j++) {
-            long start = candles.get(first + j).start();
+        for (int i = first; i <= last; i++) {
+            long start = candles.get(i).start();
             if (Math.floorMod(Math.floorDiv(start, period.seconds()), labelEvery) != 0) {
                 continue;
             }
-            int centerX = slotsLeft + j * SLOT + SLOT / 2;
+            int centerX = (int) Math.floor(view.centerX(i));
             String label = timeLabel(period, start);
-            int labelWidth = font.width(label);
-            int labelX = centerX - labelWidth / 2;
-            if (labelX < Math.max(left, lastLabelEnd + 4) || labelX + labelWidth > right) {
+            int width = font.width(label);
+            int labelX = centerX - width / 2;
+            if (labelX < Math.max(left, lastLabelEnd + 4) || labelX + width > right) {
                 continue;
             }
             graphics.verticalLine(centerX, mainTop, volumeBottom, TradingPalette.GRID);
             graphics.text(font, label, labelX, timeAxisTop + 1, TradingPalette.TEXT_SECONDARY, false);
-            lastLabelEnd = labelX + labelWidth;
+            lastLabelEnd = labelX + width;
         }
     }
 
-    /** 均线：相邻两点之间按列补满竖向像素，线才是连续的。 */
-    private static void extractAverage(GuiGraphicsExtractor graphics, double[] average, int first, int visible,
-            int slotsLeft, PriceScale scale, int color) {
+    /** 均线：相邻两点之间按列补满竖向像素，线才是连续的；两端多画一根，露出一部分的 K 线处线也不断。 */
+    private static void extractAverage(GuiGraphicsExtractor graphics, double[] average, int first, int last,
+            ChartViewport.Projection view, PriceScale scale, int color) {
         int previousX = 0;
         int previousY = 0;
         boolean hasPrevious = false;
-        for (int j = 0; j < visible; j++) {
-            double value = average[first + j];
+        for (int i = Math.max(0, first - 1); i <= Math.min(average.length - 1, last + 1); i++) {
+            double value = average[i];
             if (Double.isNaN(value)) {
                 hasPrevious = false;
                 continue;
             }
-            int x = slotsLeft + j * SLOT + SLOT / 2;
+            int x = (int) Math.floor(view.centerX(i));
             int y = scale.y(value);
-            if (hasPrevious) {
+            if (hasPrevious && x > previousX) {
                 for (int column = previousX; column < x; column++) {
                     int from = previousY + Math.round((float) (y - previousY) * (column - previousX) / (x - previousX));
                     int to = previousY + Math.round((float) (y - previousY) * (column + 1 - previousX) / (x - previousX));
@@ -204,17 +380,29 @@ final class KlineChart {
         }
     }
 
-    /** 最新价格线：虚线横穿图表，价格轴上用涨跌色底标出价格。 */
+    /**
+     * 最新价格线：虚线横穿图表，价格轴上用涨跌色底标出价格。平移后最新价格可能落在可见价格范围之外，
+     * 这时不画虚线，标签贴在主图区的上沿 / 下沿，免得压到图例或成交量。
+     */
     private void extractLastPrice(GuiGraphicsExtractor graphics, Candle latest, int left, int plotRight, int axisLeft,
             int right, PriceScale scale) {
         int color = directionColor(latest);
         int y = scale.y(latest.close());
-        for (int x = left; x < plotRight; x += 6) {
-            graphics.horizontalLine(x, Math.min(x + 2, plotRight), y, color);
+        int labelY = lastPriceLabelY(scale, y);
+        if (labelY == y) {
+            for (int x = left; x < plotRight; x += 6) {
+                graphics.horizontalLine(x, Math.min(x + 2, plotRight), y, color);
+            }
         }
-        graphics.fill(axisLeft, y - font.lineHeight / 2 - 1, right, y + font.lineHeight / 2 + 1, color);
-        graphics.text(font, MarketFormat.price(latest.close()), axisLeft + 2, y - font.lineHeight / 2,
+        graphics.fill(axisLeft, labelY - font.lineHeight / 2 - 1, right, labelY + font.lineHeight / 2 + 1, color);
+        graphics.text(font, MarketFormat.price(latest.close()), axisLeft + 2, labelY - font.lineHeight / 2,
                 TradingPalette.TEXT_PRIMARY, false);
+    }
+
+    /** 最新价格标签的纵坐标：在主图区之内原样返回，之外贴到上沿 / 下沿（标签整块都在主图区内）。 */
+    private int lastPriceLabelY(PriceScale scale, int y) {
+        int half = font.lineHeight / 2 + 1;
+        return Math.max(scale.top() + half, Math.min(y, scale.top() + scale.height() - 1 - half));
     }
 
     private void extractCrosshair(GuiGraphicsExtractor graphics, int left, int plotRight, int axisLeft, int right,
@@ -296,16 +484,5 @@ final class KlineChart {
         }
         return Component.translatable("screen.creepercapital.trading.kline.axis_time", time.day(),
                 String.format(Locale.ROOT, "%02d:%02d", time.hour(), time.minute())).getString();
-    }
-
-    /** 价格和纵坐标的换算：{@code high} 在 {@code top}，{@code low} 在 {@code top + height - 1}。 */
-    private record PriceScale(int top, int height, double high, double low) {
-        int y(double price) {
-            return top + (int) Math.round((high - price) / (high - low) * (height - 1));
-        }
-
-        double priceAt(int y) {
-            return high - (high - low) * (y - top) / (height - 1);
-        }
     }
 }
