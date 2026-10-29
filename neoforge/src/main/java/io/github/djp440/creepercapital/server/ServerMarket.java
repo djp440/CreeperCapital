@@ -16,10 +16,13 @@ import io.github.djp440.creepercapital.core.kline.KlineStore;
 import io.github.djp440.creepercapital.core.kline.Retention;
 import io.github.djp440.creepercapital.core.kline.Stats24h;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
+import io.github.djp440.creepercapital.core.market.Funding;
 import io.github.djp440.creepercapital.core.market.JumpEvent;
 import io.github.djp440.creepercapital.core.market.Market;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketState;
+import io.github.djp440.creepercapital.core.market.MarketTime;
+import io.github.djp440.creepercapital.core.market.MarketTrade;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.ModPayloads;
@@ -126,6 +129,24 @@ public final class ServerMarket {
         }
         markDirty();
         return (int) (market.snapshots().get(0).step() - before);
+    }
+
+    /**
+     * 快进到接下来第 {@code periods} 个资金费结算点（{@code /creeper dev market funding}）：每次快进恰好停在结算点那一步并广播它，
+     * 所以每个结算点都会触发一次资金费结算（普通的 {@link #advance} 只广播最后一步，跨过的结算点不会结算）。
+     *
+     * @return 实际走了的行情步数；市场暂停时为 0
+     */
+    public static int advanceToFunding(MinecraftServer server, int periods) {
+        int total = 0;
+        for (int i = 0; i < periods; i++) {
+            long seconds = market().snapshots().get(0).secondsUntilFunding();
+            long stepSeconds = MarketTime.ofStep(1).totalSeconds();
+            long steps = seconds == 0 ? Funding.INTERVAL_SECONDS / stepSeconds
+                    : seconds / stepSeconds;
+            total += advance(server, (int) steps);
+        }
+        return total;
     }
 
     /**
@@ -286,7 +307,13 @@ public final class ServerMarket {
                 ModPayloads.sendTo(player, payload);
             }
         }
-        ServerTrading.onMarketStep(server);
+        ServerLatestTrades.onMarketStep(server, snapshots);
+        ServerTrading.onMarketStep(server, snapshots);
+    }
+
+    /** 某个行情步的模拟成交（只展示用，不碰行情的随机数流，见 {@link Market#simulatedTrades}）。 */
+    static List<MarketTrade> simulatedTrades(MarketSnapshot snapshot, double previousLastPrice) {
+        return market().simulatedTrades(snapshot, previousLastPrice);
     }
 
     private static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {

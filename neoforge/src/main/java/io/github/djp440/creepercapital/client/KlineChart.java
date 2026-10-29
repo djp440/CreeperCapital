@@ -12,8 +12,9 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 
 /**
- * K 线图（币安配色）：上方是蜡烛图加三条均线，下方是成交量柱，右侧是价格轴，底部是市场时间轴，
- * 最新一根贴着右边，往左依次是更早的 K 线。鼠标悬停某根时图例显示它的开高低收、成交量和均线值。
+ * K 线图（币安配色，涨跌色跟随 {@link ColorScheme}）：上方是蜡烛图加三条均线，下方是成交量柱，右侧是价格轴，底部是市场时间轴，
+ * 最新一根贴着右边，往左依次是更早的 K 线。鼠标悬停某根时图例显示它的开高低收、成交量和均线值，时间轴上标出它的时间。
+ * 图例逐项排，放不下的项不画；价格轴刻度避开最新价格标签，不与成交量刻度相碰。
  * <p>
  * 只负责把已有的 K 线画出来，不持有状态；放不下的更早的 K 线不画。
  */
@@ -24,7 +25,8 @@ final class KlineChart {
     /** 每根 K 线占的横向像素，实体宽 {@link #BODY}，影线在正中间 1 像素。 */
     private static final int SLOT = 7;
     private static final int BODY = 5;
-    private static final int AXIS_WIDTH = 60;
+    /** 价格轴最窄的宽度；实际宽度按最高价的文字宽度算。 */
+    private static final int MIN_AXIS_WIDTH = 36;
     private static final int GRID_LINES = 4;
     private static final int VOLUME_GAP = 6;
     private static final int MIN_VOLUME_HEIGHT = 24;
@@ -55,7 +57,11 @@ final class KlineChart {
         }
         int volumeTop = mainTop + mainHeight + VOLUME_GAP;
         int volumeBottom = volumeTop + volumeHeight;
-        int axisLeft = right - AXIS_WIDTH;
+        double widest = 0;
+        for (Candle candle : candles) {
+            widest = Math.max(widest, candle.high());
+        }
+        int axisLeft = right - Math.max(MIN_AXIS_WIDTH, font.width(MarketFormat.price(widest)) + 6);
         int plotRight = axisLeft - 4;
 
         int visible = Math.min(candles.size(), (plotRight - left) / SLOT);
@@ -90,7 +96,8 @@ final class KlineChart {
         low -= pad;
         PriceScale scale = new PriceScale(mainTop, mainHeight, high, low);
 
-        extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeTop, volumeBottom, scale);
+        int lastPriceY = scale.y(candles.get(candles.size() - 1).close());
+        extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeTop, volumeBottom, scale, lastPriceY);
         extractTimeAxis(graphics, period, candles, left, first, visible, slotsLeft, right, mainTop, volumeBottom, timeAxisTop);
 
         for (int j = 0; j < visible; j++) {
@@ -109,7 +116,7 @@ final class KlineChart {
                         slotLeft + (SLOT - BODY) / 2 + BODY, volumeBottom, (color & 0x00FFFFFF) | VOLUME_ALPHA);
             }
         }
-        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, BinancePalette.TEXT_SECONDARY, false);
 
         for (int k = 0; k < MA_PERIODS.length; k++) {
             extractAverage(graphics, ma[k], first, visible, slotsLeft, scale, MA_COLORS[k]);
@@ -119,20 +126,29 @@ final class KlineChart {
         int hovered = -1;
         if (mouseX >= slotsLeft && mouseX < plotRight && mouseY >= mainTop && mouseY < volumeBottom) {
             hovered = first + (mouseX - slotsLeft) / SLOT;
-            extractCrosshair(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeBottom,
-                    slotsLeft + (hovered - first) * SLOT + SLOT / 2, mouseY, scale);
+            int centerX = slotsLeft + (hovered - first) * SLOT + SLOT / 2;
+            extractCrosshair(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeBottom, centerX, mouseY, scale);
+            String time = MarketFormat.marketTime(new MarketTime(candles.get(hovered).start()));
+            int timeWidth = font.width(time) + 6;
+            int timeLeft = Math.max(left, Math.min(centerX - timeWidth / 2, plotRight - timeWidth));
+            graphics.fill(timeLeft, timeAxisTop, timeLeft + timeWidth, bottom, BinancePalette.DIVIDER);
+            graphics.text(font, time, timeLeft + 3, timeAxisTop + 1, BinancePalette.TEXT_PRIMARY, false);
         }
         extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale);
-        extractLegend(graphics, left, top, legendHeight, candles, ma, hovered < 0 ? candles.size() - 1 : hovered);
+        extractLegend(graphics, left, top, right, legendHeight, candles, ma, hovered < 0 ? candles.size() - 1 : hovered);
     }
 
+    /** 网格线与价格轴刻度：刻度文字不出主图区域，离最新价格标签太近的刻度不画（免得叠在一起）。 */
     private void extractGrid(GuiGraphicsExtractor graphics, int left, int plotRight, int axisLeft, int right,
-            int mainTop, int mainHeight, int volumeTop, int volumeBottom, PriceScale scale) {
+            int mainTop, int mainHeight, int volumeTop, int volumeBottom, PriceScale scale, int lastPriceY) {
         for (int line = 0; line <= GRID_LINES; line++) {
             int y = mainTop + line * (mainHeight - 1) / GRID_LINES;
             graphics.horizontalLine(left, plotRight, y, BinancePalette.GRID);
-            graphics.text(font, MarketFormat.price(scale.priceAt(y)), axisLeft + 2, y - font.lineHeight / 2,
-                    BinancePalette.TEXT_SECONDARY, false);
+            int labelTop = Math.max(mainTop, Math.min(y - font.lineHeight / 2, mainTop + mainHeight - font.lineHeight));
+            if (Math.abs(labelTop + font.lineHeight / 2 - lastPriceY) <= font.lineHeight) {
+                continue;
+            }
+            graphics.text(font, MarketFormat.price(scale.priceAt(y)), axisLeft + 2, labelTop, BinancePalette.TEXT_SECONDARY, false);
         }
         graphics.horizontalLine(left, plotRight, volumeTop - 1, BinancePalette.GRID);
         graphics.horizontalLine(left, plotRight, volumeBottom, BinancePalette.GRID);
@@ -213,21 +229,21 @@ final class KlineChart {
         }
     }
 
-    /** 图例两行：第一行是选中那根的时间、开高低收和成交量，第二行是三条均线在那一根的值。 */
-    private void extractLegend(GuiGraphicsExtractor graphics, int left, int top, int lineHeight,
+    /**
+     * 图例两行：第一行是选中那根的开高低收和成交量（时间标在时间轴上），第二行是三条均线在那一根的值。
+     * 逐项往右排，排到放不下的项就停（不越出图表右边界）。
+     */
+    private void extractLegend(GuiGraphicsExtractor graphics, int left, int top, int right, int lineHeight,
             List<Candle> candles, double[][] ma, int index) {
         Candle candle = candles.get(index);
         int color = directionColor(candle);
         int y = top + 1;
         int x = left;
-        String time = MarketFormat.marketTime(new MarketTime(candle.start()));
-        graphics.text(font, time, x, y, BinancePalette.TEXT_SECONDARY, false);
-        x += font.width(time) + LEGEND_GAP;
-        x = extractLegendValue(graphics, x, y, "O", MarketFormat.price(candle.open()), color);
-        x = extractLegendValue(graphics, x, y, "H", MarketFormat.price(candle.high()), color);
-        x = extractLegendValue(graphics, x, y, "L", MarketFormat.price(candle.low()), color);
-        x = extractLegendValue(graphics, x, y, "C", MarketFormat.price(candle.close()), color);
-        extractLegendValue(graphics, x, y, Component.translatable("screen.creepercapital.trading.kline.volume").getString(),
+        x = extractLegendValue(graphics, x, y, right, "O", MarketFormat.price(candle.open()), color);
+        x = extractLegendValue(graphics, x, y, right, "H", MarketFormat.price(candle.high()), color);
+        x = extractLegendValue(graphics, x, y, right, "L", MarketFormat.price(candle.low()), color);
+        x = extractLegendValue(graphics, x, y, right, "C", MarketFormat.price(candle.close()), color);
+        extractLegendValue(graphics, x, y, right, Component.translatable("screen.creepercapital.trading.kline.volume").getString(),
                 MarketFormat.volume(candle.volume()), color);
 
         y += lineHeight;
@@ -235,21 +251,29 @@ final class KlineChart {
         for (int k = 0; k < MA_PERIODS.length; k++) {
             double value = ma[k][index];
             String text = "MA(" + MA_PERIODS[k] + ") " + (Double.isNaN(value) ? "--" : MarketFormat.price(value));
+            if (x + font.width(text) > right) {
+                break;
+            }
             graphics.text(font, text, x, y, MA_COLORS[k], false);
             x += font.width(text) + LEGEND_GAP;
         }
     }
 
-    private int extractLegendValue(GuiGraphicsExtractor graphics, int x, int y, String label, String value, int color) {
-        graphics.text(font, label, x, y, BinancePalette.TEXT_SECONDARY, false);
+    /** 图例里的一项「名称 数值」；放不下时不画，并返回超出右边界的位置，让后面的项也都不画。 */
+    private int extractLegendValue(GuiGraphicsExtractor graphics, int x, int y, int right, String label, String value, int color) {
         int valueX = x + font.width(label) + 2;
+        int end = valueX + font.width(value);
+        if (end > right) {
+            return Integer.MAX_VALUE / 2;
+        }
+        graphics.text(font, label, x, y, BinancePalette.TEXT_SECONDARY, false);
         graphics.text(font, value, valueX, y, color, false);
-        return valueX + font.width(value) + LEGEND_GAP;
+        return end + LEGEND_GAP;
     }
 
-    /** 收盘不低于开盘为涨（绿），否则为跌（红）；正在走的那根按当前价格相对开盘算。 */
+    /** 收盘不低于开盘为涨，否则为跌（颜色按涨跌色方案）；正在走的那根按当前价格相对开盘算。 */
     private static int directionColor(Candle candle) {
-        return candle.close() >= candle.open() ? BinancePalette.UP : BinancePalette.DOWN;
+        return candle.close() >= candle.open() ? BinancePalette.up() : BinancePalette.down();
     }
 
     /** 时间轴上每隔多少根 K 线标一次，按绝对序号对齐，所以新 K 线出现时标注不会跟着滚动。 */

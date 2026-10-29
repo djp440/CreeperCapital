@@ -29,8 +29,29 @@ dependencies {
     devImplementation coreMain.output
 }
 
+// 语言文件完整性检查（src/test，纯文件读取，不加载 Minecraft）：随 check 一起跑
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    defaultCharacterEncoding = 'UTF-8'
+}
+
 // 开发环境调试日志目录：仓库根目录的 logs/
 def devLogDir = rootProject.file('logs').absolutePath
+
+// 自动截图的窗口尺寸与 GUI 缩放（0 为自动），缺省 1280×720、两倍缩放
+def screenshotWidth = (project.findProperty('screenshotWidth') ?: '1280').toString()
+def screenshotHeight = (project.findProperty('screenshotHeight') ?: '720').toString()
+def screenshotGuiScale = (project.findProperty('screenshotGuiScale') ?: '2').toString()
 
 neoForge {
     version = project.neo_version
@@ -55,11 +76,12 @@ neoForge {
         }
 
         // 自动截图验收模式：./gradlew :neoforge:runScreenshots
+        // 窗口尺寸与 GUI 缩放可用 Gradle 属性改，例如 -PscreenshotWidth=1920 -PscreenshotHeight=1080 -PscreenshotGuiScale=0（0 为自动）
         screenshots {
             client()
             gameDirectory = project.file('runs/screenshots')
             systemProperty 'creepercapital.screenshot.dir', rootProject.file('screenshots').absolutePath
-            programArguments.addAll '--width', '1280', '--height', '720'
+            programArguments.addAll '--width', screenshotWidth, '--height', screenshotHeight
         }
 
         configureEach {
@@ -86,7 +108,7 @@ def prepareScreenshotRun = tasks.register('prepareScreenshotRun') {
         new File(dir, 'saves').deleteDir()
         dir.mkdirs()
         new File(dir, 'options.txt').setText([
-                'lang:zh_cn', 'guiScale:2', 'pauseOnLostFocus:false', 'onboardAccessibility:false',
+                'lang:zh_cn', "guiScale:${screenshotGuiScale}", 'pauseOnLostFocus:false', 'onboardAccessibility:false',
                 'tutorialStep:none', 'fullscreen:false', 'narrator:0'
         ].join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
     }

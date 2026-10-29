@@ -12,10 +12,14 @@ final class ScreenshotManifest {
     private ScreenshotManifest() {
     }
 
-    static void write(Path outputDir, long seed, boolean success, Collection<String> capturedIds) throws IOException {
+    /**
+     * @param window 窗口与 GUI 缩放的说明，例如「1280×720，GUI 缩放 2（界面坐标 640×360）」
+     */
+    static void write(Path outputDir, long seed, String window, boolean success, Collection<String> capturedIds) throws IOException {
         StringBuilder md = new StringBuilder("# 自动截图验收\n\n");
         md.append("- 时间：").append(LocalDateTime.now().withNano(0)).append('\n');
         md.append("- 世界：固定种子 ").append(seed).append(" 的超平坦创造世界\n");
+        md.append("- 窗口：").append(window).append('\n');
         md.append("- 结果：").append(success ? "全部截图完成" : "未完成，已截 " + capturedIds).append("\n\n");
         for (ScreenshotStep step : ScreenshotScript.STEPS) {
             md.append("## ").append(step.id()).append(' ').append(step.title()).append("\n\n");

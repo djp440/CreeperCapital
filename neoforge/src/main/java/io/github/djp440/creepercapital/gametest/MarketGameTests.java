@@ -141,6 +141,7 @@ public final class MarketGameTests {
             }
         });
         TradingGameTests.register(MarketGameTests::function);
+        LatestTradesGameTests.register(MarketGameTests::function);
         FUNCTIONS.register(modBus);
         modBus.addListener(MarketGameTests::registerTests);
     }

@@ -9,6 +9,9 @@ package io.github.djp440.creepercapital.core.market;
 final class MarketRandom {
     private static final long GOLDEN_GAMMA = 0x9E3779B97F4A7C15L;
 
+    /** 让模拟成交的流与行情的流（同一个种子和交易代码）错开。 */
+    private static final long TRADES_SALT = 0x5DEECE66DL;
+
     private long state;
 
     MarketRandom(long state) {
@@ -21,6 +24,15 @@ final class MarketRandom {
      */
     static MarketRandom forContract(long marketSeed, String symbol) {
         return new MarketRandom(new MarketRandom(marketSeed + symbol.hashCode() * GOLDEN_GAMMA).nextLong());
+    }
+
+    /**
+     * 某合约某个行情步专属的「模拟成交」随机数流：由市场种子、交易代码和行情步序号决定，与行情自己的流（{@link #forContract}）
+     * 互不影响，所以拆分成交不会改变价格路径，同一步永远得到同一个流。
+     */
+    static MarketRandom forTrades(long marketSeed, String symbol, long step) {
+        long base = new MarketRandom(marketSeed + symbol.hashCode() * GOLDEN_GAMMA + TRADES_SALT).nextLong();
+        return new MarketRandom(new MarketRandom(base + step * GOLDEN_GAMMA).nextLong());
     }
 
     /** 当前状态，传给 {@code new MarketRandom(state)} 可以从这里继续。 */

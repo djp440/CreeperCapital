@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
@@ -19,12 +20,17 @@ import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 
 /**
- * 市价开平仓（逐仓）：成交价是最新价格 ± 半个点差，对手方是流动性池，taker 手续费 0.05% 归池子。
+ * 市价开平仓（逐仓）：成交价沿虚拟流动性曲线从最新价格 ± 半个点差起逐档吃单，对手方是流动性池，taker 手续费 0.05% 归池子。
  * 钻石：点差 0.5、数量精度 3 位（1 手 = 0.001 个）；火药：点差 0.05、数量精度 0 位。期望值都是手算的。
+ * <p>
+ * 除「滑点」一节外，测试用的 {@code DIAMOND}、{@code GUNPOWDER} 把流动性深度设为无限（滑点 0），
+ * 让成交价恰好是最新价格 ± 半个点差，专注验证保证金、盈亏、手续费、守恒；曲线本身见 {@code LiquidityCurveTest}。
  */
 class TradingBookTest {
-    private static final ContractSpec DIAMOND = ContractSpec.defaults().get(0);
-    private static final ContractSpec GUNPOWDER = ContractSpec.defaults().get(1);
+    private static final ContractSpec DEEP_DIAMOND = ContractSpec.defaults().get(0);
+    private static final ContractSpec DEEP_GUNPOWDER = ContractSpec.defaults().get(1);
+    private static final ContractSpec DIAMOND = unlimitedDepth(DEEP_DIAMOND);
+    private static final ContractSpec GUNPOWDER = unlimitedDepth(DEEP_GUNPOWDER);
     private static final UUID ALICE = new UUID(0, 1);
 
     private AccountBook accounts;
@@ -36,6 +42,11 @@ class TradingBookTest {
         accounts = new AccountBook();
         pool = new LiquidityPool();
         book = new TradingBook(accounts, pool);
+    }
+
+    private static ContractSpec unlimitedDepth(ContractSpec spec) {
+        return new ContractSpec(spec.symbol(), spec.underlying(), spec.initialPrice(), spec.baseVolume(), spec.volatility(),
+                spec.spread(), spec.maxLeverage(), spec.quantityDecimals(), 0.0);
     }
 
     private static MarketSnapshot snapshot(ContractSpec spec, double last, double mark) {
@@ -224,12 +235,16 @@ class TradingBookTest {
     @Test
     @DisplayName("池子余额不够付盈利时，最多付出池子全部余额，池子不会为负")
     void poolPaysAtMostItsBalance() {
-        pool = new LiquidityPool(Money.parse("10"));
-        book = new TradingBook(accounts, pool);
-        deposit("1000");
-        book.open(ALICE, DIAMOND, snapshot(DIAMOND, 1000, 1000), Side.LONG, 2000, 10);
+        // 池子权益不足时由每步的自动减仓处理（#17）；这里是最后的兜底：池子只剩 11.00025，持仓总量上限会拒绝这么小的池子上的开仓，
+        // 所以直接用存档摆出一个 2000 手、开仓价 1000.25 的仓位
+        pool = new LiquidityPool(Money.parse("11.00025"));
+        book = TradingBook.restore(accounts, new TradingState(Money.parse("11.00025"), 0,
+                Map.of(ALICE, List.of(new Position("DIAMONDCRP", Side.LONG, 2000, 1000.25, 10, Money.parse("200.05"), 3))),
+                Map.of()));
+        pool = book.pool();
+        deposit("798.94975");
 
-        // 开仓后池子是 10 + 1.00025 = 11.00025，应付盈利 199 只能付出这 11.00025；手续费 1.09975 仍归池子
+        // 池子只有 11.00025，应付盈利 199 只能付出这 11.00025；手续费 1.09975 仍归池子
         PlayerTrade trade = filled(book.close(ALICE, DIAMOND, snapshot(DIAMOND, 1100, 1100), 2000));
 
         assertEquals(Money.parse("11.00025"), trade.realizedPnl());
@@ -461,7 +476,7 @@ class TradingBookTest {
             accounts.deposit(player, Money.parse("5000"));
         }
         Money expected = Money.parse("1015000");
-        ContractSpec[] specs = {DIAMOND, GUNPOWDER};
+        ContractSpec[] specs = {DEEP_DIAMOND, DEEP_GUNPOWDER};
         int filledTrades = 0;
 
         for (int i = 0; i < 2000; i++) {
@@ -496,8 +511,128 @@ class TradingBookTest {
         return total;
     }
 
-    // ---- 存档 ----
+    // ---- 滑点 ----
 
+    @Test
+    @DisplayName("大单沿流动性曲线逐档吃单：开多均价高于买一价，成交价、手续费都按均价算")
+    void bigOpenFillsAlongTheCurve() {
+        deposit("100000");
+
+        // 火药最新价 100，买一价 100.025，每档 5 手，步长 g = 0.006 / 19；买 12 手 = 5 + 5 + 2：
+        // 均价 = 100.025 × (5 + 5 × (1 + g) + 2 × (1 + g)²) / 12 = 100.048692，名义价值 1200.584302
+        PlayerTrade trade = filled(book.open(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), Side.LONG, 12, 10));
+
+        assertEquals(100.048692, trade.price(), 1e-6);
+        assertTrue(trade.price() > 100.025);
+        assertEquals(trade.price(), book.position(ALICE, "GUNPOWDERCRP").orElseThrow().entryPrice());
+        // 手续费 = 名义价值 × 0.05% = 0.600292151 → 0.600292
+        assertEquals(Money.parse("0.600292"), trade.fee());
+    }
+
+    @Test
+    @DisplayName("大单平仓同样滑点：平多卖出的均价低于买一价")
+    void bigCloseFillsAlongTheCurve() {
+        deposit("100000");
+        book.open(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), Side.LONG, 12, 10);
+
+        // 卖出 12 手：99.975 × (5 + 5 × (1 − g) + 2 × (1 − g)²) / 12 = 99.9513…
+        PlayerTrade trade = filled(book.close(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), 12));
+
+        assertEquals(99.9513, trade.price(), 5e-5);
+        assertTrue(trade.price() < 99.975);
+    }
+
+    @Test
+    @DisplayName("成交价与盘口一致：成交价 = LiquidityCurve 按同样数量算出的均价，买入侧的平空也走卖盘")
+    void fillPriceIsTheCurveAverage() {
+        MarketSnapshot at = snapshot(DEEP_DIAMOND, 1000, 1000);
+        var curve = DEEP_DIAMOND.liquidityCurve(1000);
+
+        assertEquals(curve.averageFillPrice(true, 3200), TradingBook.fillPrice(DEEP_DIAMOND, at, Side.LONG, TradeKind.OPEN, 3200));
+        assertEquals(curve.averageFillPrice(false, 3200), TradingBook.fillPrice(DEEP_DIAMOND, at, Side.SHORT, TradeKind.OPEN, 3200));
+        assertEquals(curve.averageFillPrice(false, 3200), TradingBook.fillPrice(DEEP_DIAMOND, at, Side.LONG, TradeKind.CLOSE, 3200));
+        assertEquals(curve.averageFillPrice(true, 3200), TradingBook.fillPrice(DEEP_DIAMOND, at, Side.SHORT, TradeKind.CLOSE, 3200));
+    }
+
+    @Test
+    @DisplayName("滑点是临时冲击：一个玩家的大单不改变快照里的最新价格，另一个玩家随后的小单仍按买一价成交")
+    void slippageDoesNotMoveThePrice() {
+        UUID bob = new UUID(0, 2);
+        deposit("1000000");
+        accounts.deposit(bob, Money.parse("1000"));
+        MarketSnapshot at = snapshot(DEEP_DIAMOND, 1000, 1000);
+
+        PlayerTrade big = filled(book.open(ALICE, DEEP_DIAMOND, at, Side.LONG, 20000, 10));
+        PlayerTrade small = filled(book.open(bob, DEEP_DIAMOND, at, Side.LONG, 100, 10));
+
+        assertTrue(big.price() > 1000.25, "大单有滑点：" + big.price());
+        assertEquals(1000.25, small.price(), "别人的大单没有挪动价格");
+        assertEquals(1000.0, at.lastPrice());
+    }
+
+    @Test
+    @DisplayName("下单面板的预估与实际开仓同源：大单的预估均价、保证金、手续费就是成交后的数值")
+    void estimateMatchesTheActualOpen() {
+        deposit("100000");
+
+        // 同 bigOpenFillsAlongTheCurve：买 12 手均价 100.048692，名义价值 1200.584302；
+        // 10 倍保证金向上取整到 1e-6 = 120.058431，手续费 0.600292
+        OpenEstimate estimate = TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.LONG, 12, 10).orElseThrow();
+        PlayerTrade trade = filled(book.open(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), Side.LONG, 12, 10));
+
+        assertEquals(100.048692, estimate.price(), 1e-6);
+        assertEquals(Money.parse("1200.584302"), estimate.notional());
+        assertEquals(Money.parse("120.058431"), estimate.margin());
+        assertEquals(Money.parse("0.600292"), estimate.fee());
+        assertEquals(trade.price(), estimate.price());
+        assertEquals(trade.fee(), estimate.fee());
+        assertEquals(book.position(ALICE, "GUNPOWDERCRP").orElseThrow().margin(), estimate.margin());
+    }
+
+    @Test
+    @DisplayName("预估卖出（开空）沿卖盘向下：12 手火药均价 99.9513，低于买一价 99.975")
+    void estimateOfASellWalksDownTheBids() {
+        OpenEstimate estimate = TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.SHORT, 12, 10).orElseThrow();
+
+        assertEquals(99.9513, estimate.price(), 5e-5);
+    }
+
+    @Test
+    @DisplayName("限价预估与挂单冻结同源：名义价值、保证金（向上取整）、maker 手续费都是定点数，不走 double")
+    void limitEstimateMatchesTheFrozenAmount() {
+        // 钻石 1.234 个（精度 3）在 1000.333：名义价值 1234.410922；7 倍保证金 176.344417428… 向上取整 176.344418；
+        // maker 手续费 0.02% × 1234.410922 = 0.2468821844 → 0.246882
+        OpenEstimate estimate = TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1000.333, 1234, 7).orElseThrow();
+
+        assertEquals(1000.333, estimate.price());
+        assertEquals(Money.parse("1234.410922"), estimate.notional());
+        assertEquals(Money.parse("176.344418"), estimate.margin());
+        assertEquals(Money.parse("0.246882"), estimate.fee());
+        assertEquals(estimate.margin().plus(estimate.fee()), TradingBook.frozenFor(DEEP_DIAMOND, 1000.333, 1234, 7));
+        assertEquals(Money.parse("176.5913"), TradingBook.frozenFor(DEEP_DIAMOND, 1000.333, 1234, 7));
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 0, 1234, 7).isEmpty());
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1000, 0, 7).isEmpty());
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1e300, Long.MAX_VALUE, 7).isEmpty());
+    }
+
+    @Test
+    @DisplayName("预估算不出价格（数量大到溢出）时为空，界面显示 --")
+    void estimateOfAnAbsurdQuantityIsEmpty() {
+        assertTrue(TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.LONG, Long.MAX_VALUE, 10).isEmpty());
+    }
+
+    @Test
+    @DisplayName("大到算不出价格的数量被拒绝，而不是成交在无穷大的价格上")
+    void absurdQuantityIsRejected() {
+        deposit("1000");
+
+        TradeResult result = book.open(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), Side.LONG, Long.MAX_VALUE, 10);
+
+        assertInstanceOf(TradeResult.Rejected.class, result);
+        assertEquals(Money.parse("1000"), accounts.balance(ALICE));
+    }
+
+    // ---- 存档 ----
     @Test
     @DisplayName("交易账的状态（池子、仓位、成交历史、成交编号）可导出并恢复，恢复后接着编号")
     void stateRoundTrips() {

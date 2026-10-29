@@ -13,15 +13,32 @@ import io.github.djp440.creepercapital.core.account.Money;
  * @param lots       数量，以合约的最小数量单位（手）计
  * @param entryPrice 开仓均价
  * @param leverage   杠杆倍数
- * @param margin     分配给这个仓位的逐仓保证金，亏损最多亏到这么多
+ * @param margin     分配给这个仓位的初始保证金（约等于开仓名义价值 / 杠杆）；逐仓时亏损最多亏到这么多，全仓时它只是占用的那部分余额
  * @param quantityDecimals 合约的数量精度：1 手是 10^-位数 个标的资源
+ * @param mode       保证金模式
  */
 public record Position(String symbol, Side side, long lots, double entryPrice, int leverage, Money margin,
-        int quantityDecimals) {
+        int quantityDecimals, MarginMode mode) {
     public Position {
         if (lots <= 0) {
             throw new IllegalArgumentException("仓位数量必须为正：" + lots);
         }
+    }
+
+    /** 逐仓仓位。 */
+    public Position(String symbol, Side side, long lots, double entryPrice, int leverage, Money margin,
+            int quantityDecimals) {
+        this(symbol, side, lots, entryPrice, leverage, margin, quantityDecimals, MarginMode.ISOLATED);
+    }
+
+    /** 同一仓位换成另一份保证金与杠杆（调整杠杆时用）。 */
+    Position withLeverage(int newLeverage, Money newMargin) {
+        return new Position(symbol, side, lots, entryPrice, newLeverage, newMargin, quantityDecimals, mode);
+    }
+
+    /** 同一仓位换成另一份保证金（资金费结算收付逐仓保证金时用）。 */
+    Position withMargin(Money newMargin) {
+        return new Position(symbol, side, lots, entryPrice, leverage, newMargin, quantityDecimals, mode);
     }
 
     /** 按某个价格估算的盈亏（做多 (价格 − 开仓均价) × 数量，做空反之），取整到最小金额单位。 */

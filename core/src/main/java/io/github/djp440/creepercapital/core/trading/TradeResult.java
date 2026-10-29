@@ -8,6 +8,14 @@ public sealed interface TradeResult {
     record Filled(PlayerTrade trade) implements TradeResult {
     }
 
+    /** 限价委托已挂出（没有立即成交），资金已冻结。 */
+    record Placed(Order order) implements TradeResult {
+    }
+
+    /** 给已有仓位补设的止盈止损委托已挂出（最多一张止盈、一张止损），不冻结资金。 */
+    record ProtectionPlaced(java.util.List<Order> orders) implements TradeResult {
+    }
+
     /**
      * 被拒绝，账户和池子都没有变化。
      *
@@ -34,7 +42,21 @@ public sealed interface TradeResult {
         /** 平仓数量超过仓位；参数：仓位数量（手）。 */
         CLOSE_EXCEEDS_POSITION,
         /** 成交价不是正数（价格已低于半个点差）。 */
-        INVALID_PRICE
+        INVALID_PRICE,
+        /** 仓位名义价值超过该杠杆下的档位上限；参数：该杠杆下允许的最大名义价值（CRP）。 */
+        POSITION_LIMIT,
+        /** 该合约有仓位或委托，不能切换保证金模式。 */
+        MARGIN_MODE_LOCKED,
+        /** 新杠杆超过当前名义价值所在档位的上限；参数：该档位的最高杠杆、当前名义价值（CRP）。 */
+        LEVERAGE_ABOVE_TIER,
+        /** 调整杠杆后仓位的保证金率会达到 100%（会被强平）；参数：调整后的保证金率（百分比文本）。 */
+        LEVERAGE_UNSAFE,
+        /** 挂着的委托已达上限；参数：上限。 */
+        TOO_MANY_ORDERS,
+        /** 止盈止损的触发价不合法（不是正数，或按当前价格会立即触发：多仓止盈须高于、止损须低于参考价，空仓相反）；参数：参考价。 */
+        INVALID_TRIGGER_PRICE,
+        /** 开仓后这个合约全体玩家的未平仓名义价值会超过持仓总量上限（流动性池权益 × 比例）；参数：当前上限（CRP）。 */
+        OPEN_INTEREST_LIMIT
     }
 
     static TradeResult reject(Reason reason, String... args) {
