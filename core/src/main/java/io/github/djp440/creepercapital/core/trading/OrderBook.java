@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
@@ -162,6 +163,22 @@ public final class OrderBook {
             return Optional.empty();
         }
         return Optional.of(cancel(order, CancelReason.USER, marketSeconds));
+    }
+
+    /**
+     * 撤销这名玩家符合条件的全部挂单并退回冻结资金（强平用，见 {@link CancelReason#LIQUIDATED}）。
+     *
+     * @param symbols 哪些合约的挂单要撤销
+     * @return 撤销事件，按委托编号
+     */
+    List<OrderEvent> cancelWhere(UUID player, Predicate<String> symbols, CancelReason reason, long marketSeconds) {
+        List<OrderEvent> events = new ArrayList<>();
+        for (Order order : List.copyOf(open.values())) {
+            if (order.player().equals(player) && symbols.test(order.symbol())) {
+                events.add(cancel(order, reason, marketSeconds));
+            }
+        }
+        return events;
     }
 
     /**

@@ -3,12 +3,15 @@ package io.github.djp440.creepercapital.core.trading;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 
 import io.github.djp440.creepercapital.core.account.AccountBook;
@@ -22,11 +25,13 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
  * 全服的交易账：玩家的仓位和成交历史，以及与玩家对赌的流动性池。市价委托以流动性池为对手方（ADR-0001），单向持仓，
  * 保证金模式按（玩家，合约）设置，逐仓或全仓（见 {@link MarginMode}）。
  * <p>
- * 资金只在玩家的可用余额（{@link AccountBook}）、仓位保证金和流动性池之间流动：开仓把保证金和手续费从可用余额划出，
- * 平仓把保证金加上已实现盈亏、减去手续费划回，盈亏的另一头和手续费都在流动性池。除开发命令外，三者的总额不变。
+ * 资金只在玩家的可用余额（{@link AccountBook}）、挂单冻结、仓位保证金、流动性池和风险保障基金之间流动：开仓把保证金和手续费
+ * 从可用余额划出，平仓把保证金加上已实现盈亏、减去手续费划回，盈亏的另一头和手续费都在流动性池。
+ * 除开发命令外，这几处的总额不变。
  * <p>
- * 尚未做强平（见 #12）：逐仓平仓时亏损最多亏到该仓位的保证金；全仓平仓时亏损最多亏到账户里的全部余额（余额不会为负）。
- * 流动性池无力付出盈利时（见 #16，ADL）最多付出池子的全部余额。
+ * 强平在每个行情步由 {@link #checkLiquidations} 检查（#12），所以正常平仓前仓位已被强平线拦住；平仓时逐仓亏损仍封顶为该仓位的保证金，
+ * 全仓亏损封顶为保证金加账户里的全部余额，余额不会为负，是跳空来不及强平时的兜底。
+ * 流动性池无力付出盈利时（见 #17，ADL）最多付出池子的全部余额。
  * <p>
  * 维持保证金、保证金率和强平价的公式在 {@link MarginMath}，分档在合约的 {@link MarginTiers}，这里不重复。
  */
@@ -41,10 +46,15 @@ public final class TradingBook {
     public static final double MAKER_FEE_RATE = 0.0002;
 
     private static final BigDecimal TAKER_FEE = BigDecimal.valueOf(TAKER_FEE_RATE);
+    /** 清算费率：强平时按标记价格算的名义价值的 0.5%（币安按合约分档，这里取一个常量）。清算费从玩家剩余的保证金里收，进风险保障基金。 */
+    public static final double LIQUIDATION_FEE_RATE = 0.005;
+
     private static final BigDecimal MAKER_FEE = BigDecimal.valueOf(MAKER_FEE_RATE);
+    private static final BigDecimal LIQUIDATION_FEE = BigDecimal.valueOf(LIQUIDATION_FEE_RATE);
 
     private final AccountBook accounts;
     private final LiquidityPool pool;
+    private final InsuranceFund fund;
     private final OrderBook orders;
     private final Map<UUID, Map<String, Position>> positions = new HashMap<>();
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
@@ -54,8 +64,13 @@ public final class TradingBook {
     private final List<Consumer<PlayerTrade>> tradeListeners = new ArrayList<>();
 
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
+        this(accounts, pool, new InsuranceFund());
+    }
+
+    private TradingBook(AccountBook accounts, LiquidityPool pool, InsuranceFund fund) {
         this.accounts = accounts;
         this.pool = pool;
+        this.fund = fund;
         this.orders = new OrderBook(this, accounts);
     }
 
@@ -66,7 +81,8 @@ public final class TradingBook {
 
     /** 从存档恢复：池子、仓位、成交历史、委托和编号接着用，玩家余额仍在传入的账本里。 */
     public static TradingBook restore(AccountBook accounts, TradingState state) {
-        TradingBook book = new TradingBook(accounts, new LiquidityPool(state.poolBalance()));
+        TradingBook book = new TradingBook(accounts, new LiquidityPool(state.poolBalance()),
+                new InsuranceFund(state.fundBalance()));
         book.lastTradeId = state.lastTradeId();
         book.orders.restore(state);
         state.positions().forEach((player, owned) -> {
@@ -96,7 +112,7 @@ public final class TradingBook {
             }
         });
         return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history),
-                orders.lastOrderId(), orders.state(), Map.copyOf(savedModes));
+                orders.lastOrderId(), orders.state(), Map.copyOf(savedModes), fund.balance());
     }
 
     /**
@@ -225,6 +241,11 @@ public final class TradingBook {
 
     public LiquidityPool pool() {
         return pool;
+    }
+
+    /** 风险保障基金：强平剩余的保证金和清算费流入，穿仓时先由它垫付。 */
+    public InsuranceFund fund() {
+        return fund;
     }
 
     public Optional<Position> position(UUID player, String symbol) {
@@ -408,6 +429,132 @@ public final class TradingBook {
         }
         return record(new PlayerTrade(0, player, spec.symbol(), position.side(), TradeKind.CLOSE, price, lots, fee,
                 realized, snapshot.time().totalSeconds()));
+    }
+
+    // ---- 强平（#12） ----
+
+    /** 强平结算结果：见 {@link LiquidationEvent} 里同名字段。 */
+    private record Settlement(Money toFund, Money shortfall, Money fundCovered, Money poolBorne) {
+    }
+
+    /**
+     * 强平检查：每个行情步、在委托触发和资金费结算之后调用一次。遍历账本里的<b>全部</b>仓位（离线玩家同样会被强平），
+     * 用 {@link MarginMath#assess} 算保证金率（仓位页展示的强平价和这里触发强平的是同一套公式），达到 100% 就强平：
+     * <ul>
+     * <li>逐仓：只看这个仓位自己，强平它；该合约的挂单一并撤销（冻结退回可用余额）。玩家抵押的是这个仓位的保证金。</li>
+     * <li>全仓：所有全仓仓位共用一个保证金率，一起强平；玩家全部挂单撤销（冻结本来就计入全仓钱包），
+     * 抵押是整个全仓钱包（全仓仓位的保证金 + 全部可用余额），强平后可用余额归零。</li>
+     * </ul>
+     * 强平按标记价格成交（不走流动性曲线，也没有滑点）。结算：抵押先抵亏损（亏损归池子，池子是对手方），剩下的（含清算费）全进风险保障基金；
+     * 亏损超过抵押即穿仓，超出部分先由基金垫付给池子，基金不够池子就少收，玩家余额不会为负。盈利（分档变化导致盈利仓位也到强平线的极端情形）
+     * 由池子付，付不出就付全部余额，等 #17 的自动减仓接管。
+     *
+     * @param markPrice     各合约当前的标记价格；返回 NaN 或非正数（合约已不在配置里）的仓位不参与检查
+     * @param tiers         各合约的维持保证金分档
+     * @param marketSeconds 此刻的市场时间（市场秒），记入成交与事件
+     * @return 这一步发生的强平，按玩家 UUID、再按结算先后排列；没有强平时为空
+     */
+    public List<LiquidationEvent> checkLiquidations(ToDoubleFunction<String> markPrice,
+            Function<String, MarginTiers> tiers, long marketSeconds) {
+        List<LiquidationEvent> events = new ArrayList<>();
+        List<UUID> players = new ArrayList<>(positions.keySet());
+        players.sort(Comparator.naturalOrder());
+        for (UUID player : players) {
+            List<Position> priced = positions(player).stream().filter(p -> hasMark(markPrice, p.symbol()))
+                    .sorted(Comparator.comparing(Position::symbol)).toList();
+            if (priced.isEmpty()) {
+                continue;
+            }
+            Map<String, MarginMath.PositionRisk> risks = MarginMath.assess(priced,
+                    assets(player, markPrice).walletBalance(), markPrice, tiers);
+            List<Position> cross = new ArrayList<>();
+            for (Position position : priced) {
+                if (risks.get(position.symbol()).marginRatio() < 1.0) {
+                    continue;
+                }
+                if (position.mode() == MarginMode.CROSS) {
+                    cross.add(position);
+                } else {
+                    events.add(liquidate(player, MarginMode.ISOLATED, List.of(position), markPrice, marketSeconds));
+                }
+            }
+            if (!cross.isEmpty()) {
+                events.add(liquidate(player, MarginMode.CROSS, cross, markPrice, marketSeconds));
+            }
+        }
+        return events;
+    }
+
+    private static boolean hasMark(ToDoubleFunction<String> markPrice, String symbol) {
+        double mark = markPrice.applyAsDouble(symbol);
+        return Double.isFinite(mark) && mark > 0;
+    }
+
+    private LiquidationEvent liquidate(UUID player, MarginMode mode, List<Position> closing,
+            ToDoubleFunction<String> markPrice, long marketSeconds) {
+        // 先撤挂单：冻结的资金退回可用余额。全仓钱包本来就含冻结，所以全仓撤全部，逐仓只撤这个合约的
+        Predicate<String> scope = mode == MarginMode.CROSS ? symbol -> true : closing.get(0).symbol()::equals;
+        List<OrderEvent> cancelled = orders.cancelWhere(player, scope, CancelReason.LIQUIDATED, marketSeconds);
+
+        Money collateral = Money.ZERO;
+        Money pnl = Money.ZERO;
+        for (Position position : closing) {
+            collateral = collateral.plus(position.margin());
+            pnl = pnl.plus(position.pnlAt(markPrice.applyAsDouble(position.symbol())));
+        }
+        if (mode == MarginMode.CROSS) {
+            // 全仓抵押的是整个全仓钱包：可用余额也押上，强平后归零
+            Money free = accounts.balance(player);
+            if (free.isPositive()) {
+                accounts.withdraw(player, free);
+                collateral = collateral.plus(free);
+            }
+        }
+        Settlement settlement = settle(collateral, pnl);
+
+        // 清算费从进基金的金额里划出一部分单独记在成交上，不超过剩余；总额不变
+        Money feeRoom = settlement.toFund();
+        List<LiquidationEvent.Liquidated> liquidated = new ArrayList<>();
+        for (Position position : closing) {
+            double mark = markPrice.applyAsDouble(position.symbol());
+            Money target = fee(notional(mark, position.lots(), position.quantityDecimals()), LIQUIDATION_FEE);
+            Money fee = target.compareTo(feeRoom) > 0 ? feeRoom : target;
+            feeRoom = feeRoom.minus(fee);
+            positions.get(player).remove(position.symbol());
+            PlayerTrade trade = ((TradeResult.Filled) record(new PlayerTrade(0, player, position.symbol(),
+                    position.side(), TradeKind.LIQUIDATION, mark, position.lots(), fee, position.pnlAt(mark),
+                    marketSeconds))).trade();
+            liquidated.add(new LiquidationEvent.Liquidated(position.symbol(), position.side(), position.lots(), mark,
+                    trade.realizedPnl(), fee, trade.id()));
+        }
+        return new LiquidationEvent(player, mode, List.copyOf(liquidated), collateral, settlement.toFund(),
+                settlement.shortfall(), settlement.fundCovered(), settlement.poolBorne(), List.copyOf(cancelled),
+                marketSeconds);
+    }
+
+    /**
+     * 强平的资金结算：{@code collateral} 是玩家押上的钱（已不在玩家账上），{@code pnl} 是按标记价格平仓的总盈亏。
+     * 玩家的钱只会去池子（亏损）或基金（剩余），永远不会为负。
+     */
+    private Settlement settle(Money collateral, Money pnl) {
+        if (pnl.units() >= 0) {
+            // 盈利（只在分档让维持保证金超过保证金时才会发生）：池子付，付不出就付全部余额；玩家的抵押加盈利全部进基金
+            Money equity = collateral.plus(pool.payUpTo(pnl));
+            fund.receive(equity);
+            return new Settlement(equity, Money.ZERO, Money.ZERO, Money.ZERO);
+        }
+        Money loss = Money.ZERO.minus(pnl);
+        if (collateral.compareTo(loss) >= 0) {
+            Money equity = collateral.minus(loss);
+            pool.receive(loss);
+            fund.receive(equity);
+            return new Settlement(equity, Money.ZERO, Money.ZERO, Money.ZERO);
+        }
+        // 穿仓：池子是对手方，本该赚 loss；玩家抵押只够付 collateral，缺口先由基金垫付，基金不够池子就少收
+        Money shortfall = loss.minus(collateral);
+        Money covered = fund.payUpTo(shortfall);
+        pool.receive(collateral.plus(covered));
+        return new Settlement(Money.ZERO, shortfall, covered, shortfall.minus(covered));
     }
 
     /** 给成交编号并记入玩家的成交历史。 */

@@ -115,10 +115,12 @@ public final class TradingSavedData extends SavedData {
             ORDER_CODEC.listOf().optionalFieldOf("orders", List.of()).forGetter(state -> flattenOrders(state)),
             // 保证金模式是 #11 新增的，旧存档没有这个字段，缺省为全部逐仓
             MODE_SETTING_CODEC.listOf().optionalFieldOf("margin_modes", List.of())
-                    .forGetter(state -> flattenModes(state)))
-            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes) -> new TradingState(pool,
+                    .forGetter(state -> flattenModes(state)),
+            // 风险保障基金是 #12 新增的，旧存档没有这个字段，缺省为 0
+            MONEY.optionalFieldOf("fund", Money.ZERO).forGetter(TradingState::fundBalance))
+            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes, fund) -> new TradingState(pool,
                     lastTradeId, groupPositions(positions), groupTrades(trades), lastOrderId, groupOrders(orders),
-                    groupModes(modes))));
+                    groupModes(modes), fund)));
 
     public static final Codec<TradingSavedData> CODEC = STATE_CODEC.xmap(TradingSavedData::new, TradingSavedData::state);
 

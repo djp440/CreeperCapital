@@ -16,20 +16,28 @@ import io.github.djp440.creepercapital.core.account.Money;
  * @param lastOrderId  最近一张委托的编号，恢复后接着往下编
  * @param orders       每位玩家的委托：挂着的和最近的历史委托（按编号从小到大）
  * @param marginModes  每位玩家按合约设置的保证金模式；只记录和缺省（逐仓）不同的，即设为全仓的合约
+ * @param fundBalance  风险保障基金余额（#12）；旧存档没有，恢复成 0
  */
 public record TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
         Map<UUID, List<PlayerTrade>> trades, long lastOrderId, Map<UUID, List<Order>> orders,
-        Map<UUID, Map<String, MarginMode>> marginModes) {
-    /** 没有委托、没有保证金模式设置（旧存档的形状）。 */
+        Map<UUID, Map<String, MarginMode>> marginModes, Money fundBalance) {
+    /** 没有委托、没有保证金模式设置、没有基金（旧存档的形状）。 */
     public TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
             Map<UUID, List<PlayerTrade>> trades) {
-        this(poolBalance, lastTradeId, positions, trades, 0, Map.of(), Map.of());
+        this(poolBalance, lastTradeId, positions, trades, 0, Map.of(), Map.of(), Money.ZERO);
     }
 
     /** 没有保证金模式设置（#11 之前的存档）。 */
     public TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
             Map<UUID, List<PlayerTrade>> trades, long lastOrderId, Map<UUID, List<Order>> orders) {
-        this(poolBalance, lastTradeId, positions, trades, lastOrderId, orders, Map.of());
+        this(poolBalance, lastTradeId, positions, trades, lastOrderId, orders, Map.of(), Money.ZERO);
+    }
+
+    /** 没有基金（#12 之前的存档）。 */
+    public TradingState(Money poolBalance, long lastTradeId, Map<UUID, List<Position>> positions,
+            Map<UUID, List<PlayerTrade>> trades, long lastOrderId, Map<UUID, List<Order>> orders,
+            Map<UUID, Map<String, MarginMode>> marginModes) {
+        this(poolBalance, lastTradeId, positions, trades, lastOrderId, orders, marginModes, Money.ZERO);
     }
 
     /** 新世界的状态：池子是初始资金，没有仓位、成交和委托。 */

@@ -386,7 +386,7 @@ class CrossMarginTest {
     // ---- 守恒 ----
 
     @Test
-    @DisplayName("全仓、逐仓混合，随机开平仓、切模式、调杠杆之后，玩家余额 + 仓位保证金 + 池子的总额不变")
+    @DisplayName("全仓、逐仓混合，随机开平仓、切模式、调杠杆、强平（含穿仓）之后，玩家余额 + 仓位保证金 + 池子 + 基金的总额不变")
     void totalIsConservedWithCrossAndLeverageChanges() {
         Random random = new Random(11);
         UUID[] players = {ALICE, new UUID(0, 2), new UUID(0, 3)};
@@ -397,6 +397,9 @@ class CrossMarginTest {
         ContractSpec[] specs = {DEEP_DIAMOND, DEEP_GUNPOWDER};
         int crossFills = 0;
         int adjustments = 0;
+        int liquidations = 0;
+        int crossLiquidations = 0;
+        int shortfalls = 0;
 
         for (int i = 0; i < 3000; i++) {
             UUID player = players[random.nextInt(players.length)];
@@ -429,6 +432,22 @@ class CrossMarginTest {
                 book.setMarginMode(player, spec.symbol(),
                         random.nextBoolean() ? MarginMode.CROSS : MarginMode.ISOLATED);
             }
+            // 每一步的价格都在 0.6 到 1.4 倍之间乱跳，高杠杆仓位会被强平，跳得深的会穿仓
+            if (random.nextInt(8) == 0) {
+                for (LiquidationEvent event : book.checkLiquidations(mark, symbol -> symbol.equals("DIAMONDCRP")
+                        ? DEEP_DIAMOND.marginTiers() : DEEP_GUNPOWDER.marginTiers(), i * 6L)) {
+                    liquidations++;
+                    crossLiquidations += event.mode() == MarginMode.CROSS ? 1 : 0;
+                    shortfalls += event.shortfall().isPositive() ? 1 : 0;
+                }
+                // 账被清空的玩家补钱（开发命令式调账，总额同步调整），让后面的操作还有钱可用
+                for (UUID p : players) {
+                    if (accounts.balance(p).compareTo(Money.parse("1000")) < 0) {
+                        accounts.deposit(p, Money.parse("5000"));
+                        expected = expected.plus(Money.parse("5000"));
+                    }
+                }
+            }
             assertEquals(expected, total(players), "第 " + i + " 次操作之后总额变了");
             for (UUID p : players) {
                 assertFalse(accounts.balance(p).units() < 0, "第 " + i + " 次操作之后余额为负");
@@ -436,10 +455,13 @@ class CrossMarginTest {
         }
         assertTrue(crossFills > 50, "应有足够多的全仓成交：" + crossFills);
         assertTrue(adjustments > 50, "应有足够多的杠杆调整：" + adjustments);
+        assertTrue(liquidations > 20, "应有足够多的强平：" + liquidations);
+        assertTrue(crossLiquidations > 3, "应有全仓强平：" + crossLiquidations);
+        assertTrue(shortfalls > 3, "应有穿仓：" + shortfalls);
     }
 
     private Money total(UUID[] players) {
-        Money total = pool.balance();
+        Money total = pool.balance().plus(book.fund().balance());
         for (UUID player : players) {
             total = total.plus(accounts.balance(player));
             for (Position position : book.positions(player)) {
