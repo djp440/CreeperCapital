@@ -2,6 +2,7 @@ package io.github.djp440.creepercapital.core.market;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -56,6 +57,135 @@ class MarketTest {
         List<Double> path = indexPricePath(new Market(42L), 14_400);
 
         assertTrue(path.stream().allMatch(price -> price > 0), "指数价格不应小于等于 0");
+    }
+
+    @Test
+    @DisplayName("走过 N 个行情步后，市场时间正好前进 6N 市场秒")
+    void marketTimeAdvancesSixSecondsPerStep() {
+        Market market = new Market(42L);
+        assertEquals(0L, market.snapshot().time().totalSeconds());
+
+        for (int steps = 1; steps <= 250; steps++) {
+            stepOnce(market);
+            assertEquals(6L * steps, market.snapshot().time().totalSeconds());
+        }
+    }
+
+    @Test
+    @DisplayName("行情步之间的 tick 不让市场时间前进")
+    void marketTimeDoesNotMoveBetweenSteps() {
+        Market market = new Market(42L);
+        for (int tick = 1; tick <= 19; tick++) {
+            market.tick();
+        }
+
+        assertEquals(0L, market.snapshot().time().totalSeconds());
+    }
+
+    @Test
+    @DisplayName("暂停期间行情步、价格和市场时间都不动；恢复后接着走")
+    void pausedMarketIsFrozenUntilResumed() {
+        Market market = new Market(42L);
+        for (int i = 0; i < 3; i++) {
+            stepOnce(market);
+        }
+        MarketSnapshot before = market.snapshot();
+
+        market.pause();
+        for (int tick = 0; tick < 100; tick++) {
+            assertTrue(market.tick().isEmpty(), "暂停时不应产生行情步");
+        }
+        assertTrue(market.isPaused());
+        assertEquals(before, market.snapshot());
+
+        market.resume();
+        assertFalse(market.isPaused());
+        assertEquals(4L, stepOnce(market).step());
+    }
+
+    @Test
+    @DisplayName("暂停时 tick 计数也冻结：恢复后仍要攒满 20 个 tick 才走下一步")
+    void pausedTicksDoNotAccumulate() {
+        Market market = new Market(42L);
+        for (int tick = 0; tick < 10; tick++) {
+            market.tick();
+        }
+        market.pause();
+        for (int tick = 0; tick < 100; tick++) {
+            market.tick();
+        }
+        market.resume();
+
+        for (int tick = 1; tick <= 9; tick++) {
+            assertTrue(market.tick().isEmpty(), "恢复后第 " + tick + " 个 tick 不应推进");
+        }
+        assertEquals(1L, market.tick().orElseThrow().step());
+    }
+
+    @Test
+    @DisplayName("保存的状态恢复后，市场时间和价格与保存时一致")
+    void restoredMarketMatchesSavedSnapshot() {
+        Market original = new Market(42L);
+        for (int i = 0; i < 123; i++) {
+            stepOnce(original);
+        }
+
+        Market restored = Market.restore(original.state());
+
+        assertEquals(original.snapshot(), restored.snapshot());
+    }
+
+    @Test
+    @DisplayName("不补算：恢复后的第一个行情步紧接保存前的最后一个行情步，之后与未中断的市场完全一致")
+    void restoredMarketContinuesWithoutCatchUp() {
+        Market uninterrupted = new Market(42L);
+        Market interrupted = new Market(42L);
+        for (int i = 0; i < 50; i++) {
+            stepOnce(uninterrupted);
+            stepOnce(interrupted);
+        }
+
+        Market restored = Market.restore(interrupted.state());
+
+        MarketSnapshot first = stepOnce(restored);
+        assertEquals(51L, first.step());
+        assertEquals(6L * 51, first.time().totalSeconds());
+        assertEquals(stepOnce(uninterrupted), first);
+        for (int i = 0; i < 200; i++) {
+            assertEquals(stepOnce(uninterrupted), stepOnce(restored));
+        }
+    }
+
+    @Test
+    @DisplayName("在一个行情步中途保存，恢复后继续攒 tick，不重置也不补算")
+    void restoredMarketKeepsPartialStepProgress() {
+        Market market = new Market(42L);
+        for (int tick = 0; tick < 7; tick++) {
+            market.tick();
+        }
+
+        Market restored = Market.restore(market.state());
+
+        for (int tick = 1; tick <= 12; tick++) {
+            assertTrue(restored.tick().isEmpty(), "第 " + tick + " 个 tick 不应推进");
+        }
+        assertEquals(1L, restored.tick().orElseThrow().step());
+    }
+
+    @Test
+    @DisplayName("种子和步数相同时，价格序列可以复现")
+    void sameSeedAndStepsGiveSamePriceSequence() {
+        assertEquals(indexPricePath(new Market(2026L), 500), indexPricePath(new Market(2026L), 500));
+    }
+
+    private static MarketSnapshot stepOnce(Market market) {
+        for (int tick = 0; tick < Market.TICKS_PER_STEP; tick++) {
+            Optional<MarketSnapshot> stepped = market.tick();
+            if (stepped.isPresent()) {
+                return stepped.get();
+            }
+        }
+        throw new AssertionError("20 个 tick 内应当产生一个行情步");
     }
 
     private static List<Double> indexPricePath(Market market, int steps) {

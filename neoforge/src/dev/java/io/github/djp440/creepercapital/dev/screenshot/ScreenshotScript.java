@@ -10,7 +10,7 @@ import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
             new ScreenshotStep("01", "交易界面：顶部行情栏",
-                    "币安深色主题；顶部行情栏左侧为 DIAMONDCRP / 永续，右侧为指数价格，价格随行情步变色（涨绿跌红），无错位和乱码。",
+                    "币安深色主题；顶部行情栏左侧为 DIAMONDCRP / 永续，其后依次为指数价格（随行情步变色，涨绿跌红）和市场时间（「第 N 日 HH:mm:ss」，每个行情步前进 6 秒），无错位和乱码。",
                     View.TRADING));
 
     private ScreenshotScript() {

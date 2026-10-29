@@ -5,6 +5,7 @@ import java.text.DecimalFormatSymbols;
 import java.util.Locale;
 
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
+import io.github.djp440.creepercapital.core.market.MarketTime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -12,7 +13,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * 交易界面（币安深色主题）。行走骨架阶段只有顶部行情栏，显示 DIAMONDCRP 的指数价格。
+ * 交易界面（币安深色主题）。行走骨架阶段只有顶部行情栏，显示 DIAMONDCRP 的指数价格和市场时间。
  * <p>
  * 界面每帧读取客户端缓存的行情，服务端每个行情步同步一次，所以价格每个行情步刷新一次。
  */
@@ -86,12 +87,30 @@ public final class TradingScreen extends Screen {
         graphics.text(font, perpetual, x, lowerY, BinancePalette.TEXT_SECONDARY, false);
         x += Math.max(font.width(snapshot.symbol()), font.width(perpetual)) + STAT_GAP;
 
-        graphics.verticalLine(x - STAT_GAP / 2, top + 6, bottom - 6, BinancePalette.DIVIDER);
-        graphics.text(font, Component.translatable("screen.creepercapital.trading.index_price"),
-                x, upperY, BinancePalette.TEXT_SECONDARY, false);
-        graphics.text(font, priceFormat.format(snapshot.indexPrice()), x, lowerY, indexPriceColor(), false);
+        x = extractStat(graphics, x, upperY, lowerY, top, bottom,
+                Component.translatable("screen.creepercapital.trading.index_price"),
+                priceFormat.format(snapshot.indexPrice()), indexPriceColor());
+        extractStat(graphics, x, upperY, lowerY, top, bottom,
+                Component.translatable("screen.creepercapital.trading.market_time"),
+                marketTimeText(snapshot.time()), BinancePalette.TEXT_PRIMARY);
 
         graphics.horizontalLine(0, width, bottom, BinancePalette.DIVIDER);
+    }
+
+    /** 一栏「名称在上、数值在下」的数据，左侧画分隔线；返回下一栏的起点。 */
+    private int extractStat(GuiGraphicsExtractor graphics, int x, int upperY, int lowerY, int top, int bottom,
+            Component label, String value, int valueColor) {
+        graphics.verticalLine(x - STAT_GAP / 2, top + 6, bottom - 6, BinancePalette.DIVIDER);
+        graphics.text(font, label, x, upperY, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, value, x, lowerY, valueColor, false);
+        return x + Math.max(font.width(label), font.width(value)) + STAT_GAP;
+    }
+
+    /** 市场日历的日期和时分秒，例如「第 3 日 08:12:06」。 */
+    private static String marketTimeText(MarketTime time) {
+        return Component.translatable("screen.creepercapital.trading.market_time.value",
+                time.day(), String.format(Locale.ROOT, "%02d:%02d:%02d", time.hour(), time.minute(), time.second()))
+                .getString();
     }
 
     private void extractWaiting(GuiGraphicsExtractor graphics) {

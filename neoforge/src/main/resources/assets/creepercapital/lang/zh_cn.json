@@ -4,5 +4,9 @@
   "screen.creepercapital.trading.title": "苦力怕资本",
   "screen.creepercapital.trading.perpetual": "永续",
   "screen.creepercapital.trading.index_price": "指数价格",
-  "screen.creepercapital.trading.waiting": "等待行情…"
+  "screen.creepercapital.trading.waiting": "等待行情…",
+  "screen.creepercapital.trading.market_time": "市场时间",
+  "screen.creepercapital.trading.market_time.value": "第 %s 日 %s",
+  "commands.creepercapital.market.paused": "市场已暂停",
+  "commands.creepercapital.market.resumed": "市场已恢复"
 }

@@ -4,5 +4,9 @@
   "screen.creepercapital.trading.title": "Creeper Capital",
   "screen.creepercapital.trading.perpetual": "Perpetual",
   "screen.creepercapital.trading.index_price": "Index Price",
-  "screen.creepercapital.trading.waiting": "Waiting for market data..."
+  "screen.creepercapital.trading.waiting": "Waiting for market data...",
+  "screen.creepercapital.trading.market_time": "Market Time",
+  "screen.creepercapital.trading.market_time.value": "Day %s %s",
+  "commands.creepercapital.market.paused": "Market paused",
+  "commands.creepercapital.market.resumed": "Market resumed"
 }

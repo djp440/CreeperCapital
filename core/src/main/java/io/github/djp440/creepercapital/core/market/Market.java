@@ -17,6 +17,7 @@ public final class Market {
     private final RandomWalkIndexPrice indexPrice;
     private int ticksIntoStep;
     private long step;
+    private boolean paused;
 
     /**
      * @param seed 行情随机数种子，同一种子走出同一条行情
@@ -25,12 +26,31 @@ public final class Market {
         this.indexPrice = new RandomWalkIndexPrice(INITIAL_INDEX_PRICE, seed);
     }
 
+    private Market(MarketState state) {
+        this.indexPrice = new RandomWalkIndexPrice(state.indexPrice(), new MarketRandom(state.randomState()));
+        this.ticksIntoStep = state.ticksIntoStep();
+        this.step = state.step();
+    }
+
+    /** 从保存的状态恢复市场，接着停下的地方走，不补算停机期间的行情。 */
+    public static Market restore(MarketState state) {
+        return new Market(state);
+    }
+
+    /** 需要持久化的全部状态。暂停是运行期开关，不在其中。 */
+    public MarketState state() {
+        return new MarketState(step, ticksIntoStep, indexPrice.current(), indexPrice.randomState());
+    }
+
     /**
-     * 推进一个服务器 tick。
+     * 推进一个服务器 tick。暂停时什么都不发生：行情步、价格、市场时间和 tick 计数全部冻结。
      *
      * @return 这个 tick 恰好完成一个行情步时返回该步的快照，否则为空
      */
     public Optional<MarketSnapshot> tick() {
+        if (paused) {
+            return Optional.empty();
+        }
         ticksIntoStep++;
         if (ticksIntoStep < TICKS_PER_STEP) {
             return Optional.empty();
@@ -39,6 +59,18 @@ public final class Market {
         step++;
         indexPrice.next();
         return Optional.of(snapshot());
+    }
+
+    public void pause() {
+        paused = true;
+    }
+
+    public void resume() {
+        paused = false;
+    }
+
+    public boolean isPaused() {
+        return paused;
     }
 
     public MarketSnapshot snapshot() {

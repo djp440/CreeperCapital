@@ -1,7 +1,5 @@
 package io.github.djp440.creepercapital.core.market;
 
-import java.util.Random;
-
 /**
  * 占位的指数价格：几何随机游走，日波动约 3%（按市场日计）。
  * <p>
@@ -12,16 +10,25 @@ final class RandomWalkIndexPrice {
     private static final double DAILY_VOLATILITY = 0.03;
     private static final double STEP_VOLATILITY = DAILY_VOLATILITY / Math.sqrt(STEPS_PER_MARKET_DAY);
 
-    private final Random random;
+    private final MarketRandom random;
     private double price;
 
     RandomWalkIndexPrice(double initialPrice, long seed) {
-        this.price = initialPrice;
-        this.random = new Random(seed);
+        this(initialPrice, new MarketRandom(seed));
+    }
+
+    RandomWalkIndexPrice(double price, MarketRandom random) {
+        this.price = price;
+        this.random = random;
     }
 
     double current() {
         return price;
+    }
+
+    /** 随机数发生器当前的状态，随存档保存。 */
+    long randomState() {
+        return random.state();
     }
 
     /** 走一个行情步。 */
