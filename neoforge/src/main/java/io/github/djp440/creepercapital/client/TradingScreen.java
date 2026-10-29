@@ -187,6 +187,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，并把当前合约最早挂出的那张当前委托标成「撤销中」（不真的发撤单）。 */
+    public static void openWithChartCancelling() {
+        open();
+        ClientMarket.selectedSymbol().ifPresent(symbol -> ClientTrading.openOrdersNewestFirst().stream()
+                .filter(order -> order.symbol().equals(symbol)).reduce((newer, older) -> older)
+                .ifPresent(order -> ChartOrderActions.devMarkCancelling(order.id())));
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();

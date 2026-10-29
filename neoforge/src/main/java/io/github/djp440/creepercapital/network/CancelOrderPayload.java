@@ -7,7 +7,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 /**
- * 客户端 → 服务端：撤销自己的一张挂单。服务端只认委托编号属于该玩家的挂单；市场暂停时也可以撤单（只是释放资金）。
+ * 客户端 → 服务端：撤销自己的一张当前委托（挂单、止盈或止损；「当前委托」页的撤销与图表 tag 上的「×」都走这里）。
+ * 服务端只认委托编号属于该玩家、仍未结束的委托，否则回报 {@code no_such_order}；市场暂停时也可以撤单（只是释放资金）。
  *
  * @param orderId 委托编号
  */

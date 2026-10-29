@@ -37,7 +37,9 @@ import net.minecraft.network.chat.Component;
  * 走现有的补设止盈止损通道），点 ✕ 或按 Esc 取消。已有的止盈 / 止损 tag 同样可以拖：确认后先挂新单、成功后撤旧单
  * （{@link ChartOrderActions}）。拖回原处（离原来那条线不到 3 像素）松开即取消；价格不合法（与服务端同一条规则）时提示原因并还原。
  * <p>
- * tag 的命中区域见 {@link ChartTagHits}：文字区拖拽，按钮（✓ / ✕）在右端，中间隔一段不触发任何操作的缝。
+ * 快捷撤销（#37）：每张当前委托的 tag 右端有一个「×」，点一下直接撤单（不二次确认），撤销中 tag 置灰、「×」点不动，
+ * 成功后线与 tag 随同步消失，失败在图表顶部提示（{@link ChartOrderActions}）。
+ * tag 的命中区域见 {@link ChartTagHits}：文字区拖拽，按钮（✓ / ✕ / ×）在右端，中间隔一段不触发任何操作的缝，拖拽与撤销互不误触。
  */
 final class ChartOverlay {
     private static final int TAG_PAD = 3;
@@ -125,6 +127,8 @@ final class ChartOverlay {
                 } else {
                     edit = null;
                 }
+            } else if (line.kind() == Kind.ORDER && line.order() != null && !ChartOrderActions.cancelling(line.order().id())) {
+                ChartOrderActions.cancel(line.order().id());
             }
         } else if (hit.zone() == ChartTagHits.Zone.DRAG && symbol != null) {
             if (line.kind() == Kind.EDIT && edit != null) {
@@ -283,8 +287,15 @@ final class ChartOverlay {
                     || (editing != null && editing.id() == order.id())) {
                 continue; // 正在改的 / 改单后正在撤的旧单：图上只画新位置
             }
+            if (ChartOrderActions.cancelling(order.id())) {
+                // 撤销中：置灰，不能拖，「×」点不动
+                lines.add(new Line(Kind.ORDER, order.price(), TradingPalette.DISABLED,
+                        Component.translatable("screen.creepercapital.trading.chart.cancelling", orderText(order)).getString(),
+                        true, order, false, 1));
+                continue;
+            }
             boolean protection = order.type().isTrigger() && position.isPresent();
-            lines.add(new Line(Kind.ORDER, order.price(), orderColor(order), orderText(order), true, order, protection, 0));
+            lines.add(new Line(Kind.ORDER, order.price(), orderColor(order), orderText(order), true, order, protection, 1));
         }
         ChartOrderActions.Pending pending = ChartOrderActions.pending();
         if (pending != null && pending.symbol().equals(symbol)) {
@@ -483,7 +494,7 @@ final class ChartOverlay {
         ChartTagHits.Hit hover = ChartTagHits.hit(tags, mouseX, mouseY);
         if (isDragging() || hover.zone() == ChartTagHits.Zone.DRAG) {
             graphics.requestCursor(CursorTypes.RESIZE_NS);
-        } else if (hover.zone() == ChartTagHits.Zone.BUTTON) {
+        } else if (hover.zone() == ChartTagHits.Zone.BUTTON && !cancelling(lines.get(hover.tag()))) {
             graphics.requestCursor(CursorTypes.POINTING_HAND);
         }
         extractNotice(graphics, plotLeft, plotRight, scale.top());
@@ -497,7 +508,8 @@ final class ChartOverlay {
         graphics.verticalLine(ChartTagHits.bodyRight(tag) + ChartTagHits.DEAD_ZONE / 2, tag.top(), tag.bottom() - 1, line.color());
         for (int b = 0; b < line.buttons(); b++) {
             int left = ChartTagHits.buttonLeft(tag, b);
-            boolean hovered = mouseX >= left && mouseX < left + ChartTagHits.BUTTON_WIDTH && mouseY >= tag.top()
+            boolean disabled = cancelling(line);
+            boolean hovered = !disabled && mouseX >= left && mouseX < left + ChartTagHits.BUTTON_WIDTH && mouseY >= tag.top()
                     && mouseY < tag.bottom();
             graphics.fill(left, tag.top() + 1, left + ChartTagHits.BUTTON_WIDTH - 1, tag.bottom() - 1,
                     hovered ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
@@ -506,9 +518,14 @@ final class ChartOverlay {
             if (line.kind() == Kind.EDIT && b == 0) {
                 extractCheck(graphics, iconLeft, iconTop, TradingPalette.up());
             } else {
-                extractCross(graphics, iconLeft, iconTop, TradingPalette.TEXT_PRIMARY);
+                extractCross(graphics, iconLeft, iconTop, disabled ? TradingPalette.TEXT_SECONDARY : TradingPalette.TEXT_PRIMARY);
             }
         }
+    }
+
+    /** 这条线是不是正在撤销的当前委托（「×」置灰、点不动）。 */
+    private static boolean cancelling(Line line) {
+        return line.kind() == Kind.ORDER && line.order() != null && ChartOrderActions.cancelling(line.order().id());
     }
 
     /** 7×7 的对勾，左上角在 {@code (x, y)}。 */
@@ -555,8 +572,8 @@ final class ChartOverlay {
     }
 
     /**
-     * 价格轴标记的上边缘（与 {@code lines} 一一对应）：错开不重叠，出界的贴在上沿 / 下沿。
-     * 最新价格标签（中心在 {@code lastPriceY}）也参与错开，只是不在返回值里，免得被它盖住。
+     * 价格轴标记的上边缘：前 {@code lines.size()} 项与 {@code lines} 一一对应，最后一项是最新价格标签（原本中心在 {@code lastPriceY}）。
+     * 两者一起按价格顺序错开、不互相遮挡，出界的贴在上沿 / 下沿。
      */
     List<Integer> axisMarkTops(List<Line> lines, PriceScale scale, int lastPriceY) {
         List<ChartTagLayout.Request> requests = new ArrayList<>(lines.size() + 1);
@@ -565,7 +582,7 @@ final class ChartOverlay {
         }
         requests.add(new ChartTagLayout.Request(lastPriceY, axisMarkHeight()));
         return ChartTagLayout.layout(requests, scale.top(), scale.top() + scale.height(), 0).stream()
-                .limit(lines.size()).map(ChartTagLayout.Placement::top).toList();
+                .map(ChartTagLayout.Placement::top).toList();
     }
 
     /** 价格轴上的价格标记：线色底（强平价黄底深色字），位置见 {@link #axisMarkTops}。 */

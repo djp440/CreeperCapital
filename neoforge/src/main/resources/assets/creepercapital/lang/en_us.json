@@ -45,6 +45,7 @@
   "screen.creepercapital.trading.chart.modified": "TP/SL updated",
   "screen.creepercapital.trading.chart.no_response": "No response from the server; check Open Orders",
   "screen.creepercapital.trading.chart.replace_cancel_failed": "New TP/SL placed, but the old one could not be cancelled (it may have just triggered); check Open Orders",
+  "screen.creepercapital.trading.chart.cancelling": "%s  Cancelling…",
   "screen.creepercapital.trading.chart.cancel_failed": "Cancel failed: %s",
   "commands.creepercapital.market.paused": "Market paused",
   "commands.creepercapital.market.resumed": "Market resumed",

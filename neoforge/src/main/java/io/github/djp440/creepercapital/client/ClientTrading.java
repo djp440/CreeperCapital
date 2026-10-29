@@ -314,7 +314,7 @@ public final class ClientTrading {
                 takeProfit, stopLoss, triggerSource, reduceOnly));
     }
 
-    /** 撤销一张挂单；结果由服务端回报。 */
+    /** 撤销一张当前委托（挂单或止盈止损）；结果由服务端回报。 */
     public static void cancel(long orderId) {
         ClientPacketDistributor.sendToServer(new CancelOrderPayload(orderId));
     }

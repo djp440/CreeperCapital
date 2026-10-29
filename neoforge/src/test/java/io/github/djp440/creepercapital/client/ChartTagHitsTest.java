@@ -8,7 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 图表 tag 的命中测试：拖拽区（tag 的文字部分）与按钮（✓ / ✕）各占一块，中间隔着一段什么都不触发的缝，不会误触。
+ * 图表 tag 的命中测试：拖拽区（tag 的文字部分）与按钮（✓ / ✕ / 撤销「×」）各占一块，中间隔着一段什么都不触发的缝，不会误触。
  */
 class ChartTagHitsTest {
     /** 一个带两个按钮（✓、✕）的可拖动 tag：[10, 110) × [50, 62)。 */
@@ -50,6 +50,37 @@ class ChartTagHitsTest {
         ChartTagHits.Tag liquidation = new ChartTagHits.Tag(10, 50, 90, 62, 0, false);
         assertEquals(ChartTagHits.Zone.NONE, hit(20, 55, liquidation).zone());
         assertEquals(90, ChartTagHits.bodyRight(liquidation), "没有按钮时文字区占满");
+    }
+
+    @Test
+    @DisplayName("止盈止损 tag：右端「×」撤销，文字区拖拽改价，两块之间隔着缝、逐像素互不重叠")
+    void cancelButtonIsSeparateFromTheDragArea() {
+        ChartTagHits.Tag protection = new ChartTagHits.Tag(10, 50, 120, 62, 1, true);
+        int cancelLeft = ChartTagHits.buttonLeft(protection, 0);
+
+        assertEquals(120 - ChartTagHits.BUTTON_WIDTH, cancelLeft, "「×」贴着 tag 右端");
+        assertEquals(new ChartTagHits.Hit(0, ChartTagHits.Zone.BUTTON, 0), hit(cancelLeft, 55, protection));
+        assertEquals(new ChartTagHits.Hit(0, ChartTagHits.Zone.DRAG, -1), hit(cancelLeft - ChartTagHits.DEAD_ZONE - 1, 55, protection));
+        int lastDrag = -1;
+        int firstButton = Integer.MAX_VALUE;
+        for (int x = 10; x < 120; x++) {
+            ChartTagHits.Zone zone = hit(x, 55, protection).zone();
+            if (zone == ChartTagHits.Zone.DRAG) {
+                lastDrag = x;
+            } else if (zone == ChartTagHits.Zone.BUTTON) {
+                firstButton = Math.min(firstButton, x);
+            }
+        }
+        assertEquals(ChartTagHits.DEAD_ZONE, firstButton - lastDrag - 1, "拖拽区与「×」之间正好隔一段缝");
+    }
+
+    @Test
+    @DisplayName("限价委托 tag：只有「×」可点，文字区不可拖")
+    void limitOrderTagOnlyCancels() {
+        ChartTagHits.Tag limit = new ChartTagHits.Tag(10, 50, 120, 62, 1, false);
+
+        assertEquals(ChartTagHits.Zone.BUTTON, hit(119, 55, limit).zone());
+        assertEquals(ChartTagHits.Zone.NONE, hit(20, 55, limit).zone());
     }
 
     @Test

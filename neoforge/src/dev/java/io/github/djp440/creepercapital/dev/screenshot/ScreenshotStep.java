@@ -63,7 +63,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，图表上正从持仓线往上拖出止盈线（触发价 = 最新价 × 1.008，还按着鼠标）。 */
         CHART_EDIT_DRAGGING(minecraft -> TradingScreen.openWithChartEdit(1.008, true)),
         /** 交易界面，图表上从持仓线往下拖出的止损线已松开（触发价 = 最新价 × 0.994），tag 上出现 ✓ / ✕。 */
-        CHART_EDIT_CONFIRM(minecraft -> TradingScreen.openWithChartEdit(0.994, false));
+        CHART_EDIT_CONFIRM(minecraft -> TradingScreen.openWithChartEdit(0.994, false)),
+        /** 交易界面，当前合约最早挂出的那张当前委托处于「撤销中」（只是客户端状态，不发撤单）。 */
+        CHART_CANCELLING(minecraft -> TradingScreen.openWithChartCancelling());
 
         private final Consumer<Minecraft> opener;
 

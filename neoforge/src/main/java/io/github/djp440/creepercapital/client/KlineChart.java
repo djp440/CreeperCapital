@@ -344,7 +344,9 @@ final class KlineChart {
         // 本人的买卖点、持仓线、强平价与当前委托（只看当前合约）；价格轴刻度避开它们在轴上的标记
         String symbol = ClientMarket.selectedSymbol().orElse(null);
         List<ChartOverlay.Line> overlayLines = symbol == null ? List.of() : overlay.lines(symbol);
-        List<Integer> markTops = overlay.axisMarkTops(overlayLines, scale, lastPriceY);
+        List<Integer> axisTops = overlay.axisMarkTops(overlayLines, scale, lastPriceY);
+        List<Integer> markTops = axisTops.subList(0, overlayLines.size());
+        lastPriceY = axisTops.get(overlayLines.size()) + overlay.axisMarkHeight() / 2; // 最新价格标签与价格标记一起错开
         extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, showVolume, volumeTop, volumeBottom, scale, lastPriceY,
                 markTops, overlay.axisMarkHeight());
         extractTimeAxis(graphics, period, candles, left, view, right, mainTop, volumeBottom, timeAxisTop);
@@ -405,7 +407,7 @@ final class KlineChart {
         } else {
             hovered = -1;
         }
-        extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale);
+        extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale, lastPriceY);
         extractLegend(graphics, settings, left, top, right, legendHeight, candles, ma, hovered < 0 ? last : hovered, mouseX, mouseY);
         panel.extract(graphics, left, top, right, mouseX, mouseY, partialTick);
     }
@@ -556,14 +558,14 @@ final class KlineChart {
 
     /**
      * 最新价格线：虚线横穿图表，价格轴上用涨跌色底标出价格。平移后最新价格可能落在可见价格范围之外，
-     * 这时不画虚线，标签贴在主图区的上沿 / 下沿，免得压到图例或成交量。
+     * 这时不画虚线，标签贴在主图区的上沿 / 下沿，免得压到图例或成交量。标签与持仓 / 委托的价格标记一起错开，
+     * 中心在 {@code labelY}（挤在一起时可能离虚线几个像素）。
      */
     private void extractLastPrice(GuiGraphicsExtractor graphics, Candle latest, int left, int plotRight, int axisLeft,
-            int right, PriceScale scale) {
+            int right, PriceScale scale, int labelY) {
         int color = directionColor(latest);
         int y = scale.y(latest.close());
-        int labelY = lastPriceLabelY(scale, y);
-        if (labelY == y) {
+        if (lastPriceLabelY(scale, y) == y) {
             for (int x = left; x < plotRight; x += 6) {
                 graphics.horizontalLine(x, Math.min(x + 2, plotRight), y, color);
             }

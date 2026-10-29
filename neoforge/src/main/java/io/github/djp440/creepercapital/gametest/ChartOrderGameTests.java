@@ -22,7 +22,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
- * 图表上的委托操作发出的载荷（#36 拖拽设 / 改止盈止损），走的都是现有通道：服务端照常接受或拒绝。
+ * 图表上的委托操作发出的载荷（#36 拖拽设 / 改止盈止损、#37 tag 上「×」撤单），走的都是现有通道：服务端照常接受或拒绝。
  * 拖拽 → 价格的换算、止盈 / 止损的区分在 neoforge 的 JUnit（{@code ProtectionDragTest}）；这里验证这些价格组成的载荷到了服务端的结果，
  * 以及客户端判定合法性用的 {@link Protection#validTrigger} 与服务端的实际裁决一致。
  */
@@ -37,6 +37,8 @@ final class ChartOrderGameTests {
                 ChartOrderGameTests::dragPayloadsAcceptedOrRejected);
         function.accept("chart_drag_modify_places_the_new_order_before_cancelling_the_old_one",
                 ChartOrderGameTests::modifyPlacesNewThenCancelsOld);
+        function.accept("chart_cancel_button_cancels_limit_and_protection_orders",
+                ChartOrderGameTests::cancelButtonCancelsOrders);
     }
 
     private static ContractSpec spec() {
@@ -144,6 +146,40 @@ final class ChartOrderGameTests {
             helper.assertValueEqual(open.size(), 1, "最后只剩一张止盈");
             helper.assertValueEqual(open.get(0).price(), moved, "是改过价的那张");
             helper.assertValueEqual(open.get(0).lots(), old.lots(), "数量沿用旧单");
+        } finally {
+            TradingGameTests.finish(player);
+        }
+        helper.succeed();
+    }
+
+    /**
+     * tag 上的「×」发的是现有的 {@link CancelOrderPayload}：挂单和止盈止损都能撤（order_cancelled，线随同步消失）；
+     * 已经不在的委托（重复点、刚好成交）回报 no_such_order，客户端据此提示「撤销失败」。
+     */
+    private static void cancelButtonCancelsOrders(GameTestHelper helper) {
+        ServerPlayer player = TradingGameTests.trader(helper, "ChartTrader3", "100000");
+        try {
+            UUID id = player.getUUID();
+            openLong(player);
+            long positionLots = ServerTrading.book().position(id, DIAMOND).orElseThrow().lots();
+            double reference = last();
+            ServerTrading.handleOrder(player, OrderPayload.protect(DIAMOND, positionLots, true, rounded(reference * 1.05),
+                    TriggerSource.LAST));
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, lots(),
+                    Math.min(10, spec().maxLeverage()), OrderPayload.Execution.LIMIT, rounded(reference * 0.9)));
+            List<Order> open = ServerTrading.book().orders().open(id);
+            helper.assertValueEqual(open.size(), 2, "一张止盈、一张限价挂单");
+
+            for (Order order : open) {
+                ServerTrading.handleCancel(player, new CancelOrderPayload(order.id()));
+                helper.assertValueEqual(result(player).code(), "order_cancelled", "撤销 " + order.type());
+            }
+            helper.assertValueEqual(ServerTrading.book().orders().open(id).size(), 0, "都撤掉了");
+
+            ServerTrading.handleCancel(player, new CancelOrderPayload(open.get(0).id()));
+            OrderResultPayload again = result(player);
+            helper.assertValueEqual(again.success(), false, "再撤一次失败");
+            helper.assertValueEqual(again.code(), "no_such_order", "已经不在的委托");
         } finally {
             TradingGameTests.finish(player);
         }
