@@ -17,6 +17,7 @@ import io.github.djp440.creepercapital.CreeperCapital;
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderExtras;
@@ -117,6 +118,21 @@ public final class TradingSavedData extends SavedData {
             EXTRAS_CODEC.optionalFieldOf("extras", OrderExtras.NONE).forGetter(Order::extras))
             .apply(i, Order::new));
 
+    private static final Codec<FundingRecord> FUNDING_CODEC = RecordCodecBuilder.create(i -> i.group(
+            Codec.LONG.fieldOf("id").forGetter(FundingRecord::id),
+            UUIDUtil.CODEC.fieldOf("player").forGetter(FundingRecord::player),
+            Codec.STRING.fieldOf("symbol").forGetter(FundingRecord::symbol),
+            SIDE.fieldOf("side").forGetter(FundingRecord::side),
+            MODE.fieldOf("margin_mode").forGetter(FundingRecord::mode),
+            Codec.LONG.fieldOf("lots").forGetter(FundingRecord::lots),
+            Codec.DOUBLE.fieldOf("rate").forGetter(FundingRecord::rate),
+            Codec.DOUBLE.fieldOf("mark_price").forGetter(FundingRecord::markPrice),
+            MONEY.fieldOf("notional").forGetter(FundingRecord::notional),
+            MONEY.fieldOf("amount").forGetter(FundingRecord::amount),
+            MONEY.fieldOf("shortfall").forGetter(FundingRecord::shortfall),
+            Codec.LONG.fieldOf("market_seconds").forGetter(FundingRecord::marketSeconds))
+            .apply(i, FundingRecord::new));
+
     private static final Codec<TradingState> STATE_CODEC = RecordCodecBuilder.create(i -> i.group(
             MONEY.fieldOf("pool").forGetter(TradingState::poolBalance),
             Codec.LONG.fieldOf("last_trade_id").forGetter(TradingState::lastTradeId),
@@ -127,10 +143,13 @@ public final class TradingSavedData extends SavedData {
             ORDER_CODEC.listOf().optionalFieldOf("orders", List.of()).forGetter(state -> flattenOrders(state)),
             // 保证金模式是 #11 新增的，旧存档没有这个字段，缺省为全部逐仓
             MODE_SETTING_CODEC.listOf().optionalFieldOf("margin_modes", List.of())
-                    .forGetter(state -> flattenModes(state)))
-            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes) -> new TradingState(pool,
-                    lastTradeId, groupPositions(positions), groupTrades(trades), lastOrderId, groupOrders(orders),
-                    groupModes(modes))));
+                    .forGetter(state -> flattenModes(state)),
+            // 资金费记录是 #13 新增的，旧存档没有这两个字段，缺省为没有记录
+            Codec.LONG.optionalFieldOf("last_funding_id", 0L).forGetter(TradingState::lastFundingId),
+            FUNDING_CODEC.listOf().optionalFieldOf("funding", List.of()).forGetter(state -> flattenFunding(state)))
+            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders, modes, lastFundingId, funding) ->
+                    new TradingState(pool, lastTradeId, groupPositions(positions), groupTrades(trades), lastOrderId,
+                            groupOrders(orders), groupModes(modes), lastFundingId, groupFunding(funding))));
 
     public static final Codec<TradingSavedData> CODEC = STATE_CODEC.xmap(TradingSavedData::new, TradingSavedData::state);
 
@@ -165,6 +184,21 @@ public final class TradingSavedData extends SavedData {
         state.trades().values().forEach(flat::addAll);
         flat.sort(Comparator.comparingLong(PlayerTrade::id));
         return flat;
+    }
+
+    private static List<FundingRecord> flattenFunding(TradingState state) {
+        List<FundingRecord> flat = new ArrayList<>();
+        state.funding().values().forEach(flat::addAll);
+        flat.sort(Comparator.comparingLong(FundingRecord::id));
+        return flat;
+    }
+
+    private static Map<UUID, List<FundingRecord>> groupFunding(List<FundingRecord> flat) {
+        Map<UUID, List<FundingRecord>> grouped = new LinkedHashMap<>();
+        for (FundingRecord record : flat) {
+            grouped.computeIfAbsent(record.player(), p -> new ArrayList<>()).add(record);
+        }
+        return grouped;
     }
 
     private static List<ModeSetting> flattenModes(TradingState state) {

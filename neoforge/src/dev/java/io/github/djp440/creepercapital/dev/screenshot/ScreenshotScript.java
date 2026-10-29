@@ -173,7 +173,17 @@ final class ScreenshotScript {
                             + "DIAMONDCRP 逐仓那一行不变；列不重叠、无乱码。",
                     View.POSITIONS,
                     lowerGunpowderLeverage()),
-            new ScreenshotStep("22", "止盈止损设置（GUNPOWDERCRP，3 级验收）",
+            new ScreenshotStep("22", "资金费记录页（快进经过两个结算点，3 级验收）",
+                    "表格区的「资金费记录」页签为黄字加下划线；表头：时间、合约、方向、资金费率、标记价格、名义价值、资金费(CRP)、未收付；"
+                            + "刚用 /creeper dev market funding 2 快进了两个结算点（行情栏倒计时走到 00:00:00 的那一步各结算一次），"
+                            + "所以有四行记录（最新的在上，每个结算点两行：GUNPOWDERCRP 全仓多头和 DIAMONDCRP 逐仓空头），"
+                            + "两个结算点的市场时间相差 8 小时（形如「第 N 日 08:00:00」「第 N 日 16:00:00」，时间栏是 HH:mm:ss 格式的市场时间）；"
+                            + "金额收付由费率符号与方向决定：费率为正时多头付（红字，带负号）、空头收（绿字，带正号），费率为负时相反（两行可能同为付出，取决于两个合约各自的费率符号），"
+                            + "金额 = 名义价值 × 资金费率（例如名义价值 40,000 CRP、费率 0.2700% 时约 108 CRP）；下单面板结果行是「资金费已支付 / 已收到 … CRP」；"
+                            + "方向列多绿空红；未收付列都是灰色的 \"--\"（仓位保证金 / 余额足够）；列不重叠、无乱码。",
+                    View.FUNDING,
+                    settleFundingTwice()),
+            new ScreenshotStep("23", "止盈止损设置（GUNPOWDERCRP，3 级验收）",
                     "下单面板里，数量框下面的小页签条是「预估 | 止盈止损」，「止盈止损」为黄字加下划线（输入框里已填价格，所以页签文字后面带黄色星号）；页内左右并排两个输入框：止盈价（约最新价 105%，单位 CRP）、止损价（约最新价 97%）；"
                             + "其下是触发价来源开关「触发：标记价格」和「只减仓」复选框（未勾选）；"
                             + "页签条右侧是缩短的仓位提示「多 300 · 5x」（绿字，前面步骤已把 GUNPOWDERCRP 全仓多头调成 5x）；下单面板在市价模式（顶部右侧是「全仓」按钮），杠杆 5x 与仓位一致；"
@@ -181,20 +191,25 @@ final class ScreenshotScript {
                             + "整个面板不越出面板底部，不与图表、盘口重叠，无错位和乱码。",
                     View.PROTECTION,
                     markTrigger()),
-            new ScreenshotStep("23", "当前委托页：止盈止损单与限价平仓（3 级验收）",
+            new ScreenshotStep("24", "当前委托页：止盈止损单与限价平仓（3 级验收）",
                     "「当前委托」页签为黄字加下划线；最新的五行（更早的 DIAMONDCRP 开空限价单被表格高度截在第六行之外）依次是 GUNPOWDERCRP 的止盈、止损单（类型列分别是「止盈·标记价」「止损·标记价」，"
                             + "方向列是「平多」，委托/触发价列是触发价，约为最新价的 110% 与 90%，数量 300），DIAMONDCRP 的止盈、止损单（类型「止盈·最新价」「止损·最新价」，"
                             + "方向「平空」，数量 1.500），以及一张 GUNPOWDERCRP「限价只减仓」平多单（委托价约最新价 120%，数量 300）；平仓类委托没有冻结资金，冻结列显示 \"--\"；"
                             + "每行有「撤单」按钮；列不重叠、无乱码。",
                     View.OPEN_ORDERS,
                     placeProtectionOrders()),
-            new ScreenshotStep("24", "历史委托页：撤销的止损单（3 级验收）",
+            new ScreenshotStep("25", "历史委托页：撤销的止损单（3 级验收）",
                     "「历史委托」页签为黄字加下划线；最新一条是 DIAMONDCRP 的「止损·最新价」单，方向「平空」，状态「已撤销」灰字，成交价与手续费显示 \"--\"；"
                             + "委托/触发价列是触发价而不是成交价；列不重叠、无乱码。",
                     View.ORDER_HISTORY,
                     cancelDiamondStopLoss()));
 
     private ScreenshotScript() {
+    }
+
+    /** 快进经过两个资金费结算点（服务端精确停在结算点那一步，触发结算）；仓位沿用前面步骤留下的全仓多头与逐仓空头。 */
+    private static Consumer<Minecraft> settleFundingTwice() {
+        return minecraft -> minecraft.player.connection.sendCommand("creeper dev market funding 2");
     }
 
     private static Consumer<Minecraft> select(CandlePeriod period) {

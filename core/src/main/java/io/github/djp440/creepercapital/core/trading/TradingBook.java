@@ -40,6 +40,9 @@ public final class TradingBook {
     /** maker 手续费率：成交名义价值的 0.02%（限价委托被动成交）。 */
     public static final double MAKER_FEE_RATE = 0.0002;
 
+    /** 每位玩家的资金费记录最多保留多少条（最近的）。 */
+    public static final int MAX_FUNDING_PER_PLAYER = 200;
+
     private static final BigDecimal TAKER_FEE = BigDecimal.valueOf(TAKER_FEE_RATE);
     private static final BigDecimal MAKER_FEE = BigDecimal.valueOf(MAKER_FEE_RATE);
 
@@ -50,7 +53,9 @@ public final class TradingBook {
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
     /** 设为全仓的（玩家，合约）；没有记录的是缺省的逐仓。 */
     private final Map<UUID, Map<String, MarginMode>> modes = new HashMap<>();
+    private final Map<UUID, List<FundingRecord>> funding = new HashMap<>();
     private long lastTradeId;
+    private long lastFundingId;
     private final List<Consumer<PlayerTrade>> tradeListeners = new ArrayList<>();
 
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
@@ -76,6 +81,8 @@ public final class TradingBook {
         });
         state.trades().forEach((player, history) -> book.trades.put(player, new ArrayList<>(history)));
         state.marginModes().forEach((player, bySymbol) -> book.modes.put(player, new HashMap<>(bySymbol)));
+        book.lastFundingId = state.lastFundingId();
+        state.funding().forEach((player, history) -> book.funding.put(player, new ArrayList<>(history)));
         return book;
     }
 
@@ -95,8 +102,10 @@ public final class TradingBook {
                 savedModes.put(player, Map.copyOf(bySymbol));
             }
         });
+        Map<UUID, List<FundingRecord>> savedFunding = new HashMap<>();
+        funding.forEach((player, list) -> savedFunding.put(player, List.copyOf(list)));
         return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history),
-                orders.lastOrderId(), orders.state(), Map.copyOf(savedModes));
+                orders.lastOrderId(), orders.state(), Map.copyOf(savedModes), lastFundingId, Map.copyOf(savedFunding));
     }
 
     /**
@@ -430,6 +439,80 @@ public final class TradingBook {
         }
         return record(new PlayerTrade(0, player, spec.symbol(), position.side(), TradeKind.CLOSE, price, lots, fee,
                 realized, marketSeconds));
+    }
+
+    /** 这名玩家最近的资金费记录，按结算先后排列（最旧的在前）。 */
+    public List<FundingRecord> fundingRecords(UUID player) {
+        return List.copyOf(funding.getOrDefault(player, List.of()));
+    }
+
+    /**
+     * 资金费结算：快照恰在结算点（距下次结算 0 秒，行情栏倒计时显示 00:00:00）时，该合约的每个仓位按
+     * 「名义价值（结算时的标记价格 × 数量）× 结算时的资金费率」与流动性池收付；不在结算点什么也不做。
+     * 费率取自快照（结算点那一步的采样归旧期，它就是本期最终的费率），不另算。
+     * <p>
+     * 费率为正多头付、为负空头付，对手方是流动性池。逐仓从该仓位的保证金里收付，全仓从空闲余额里收付：
+     * <ul>
+     * <li>付不起时扣到 0 为止（逐仓保证金扣到 0，全仓余额扣到 0），差额记在 {@link FundingRecord#shortfall()}，不追讨；
+     * 保证金被扣光的仓位仍留着，由强平检查接手；</li>
+     * <li>池子付不起时最多付出它的全部余额，差额同样记入 {@code shortfall}。</li>
+     * </ul>
+     * 玩家与池子之间收付的总额为零（实际收付的金额两头相等），不论玩家在线与否。
+     *
+     * @return 这次结算产生的资金费记录，按玩家编号排序；不在结算点或没有仓位时为空
+     */
+    public List<FundingRecord> settleFunding(MarketSnapshot snapshot) {
+        if (snapshot.secondsUntilFunding() != 0 || !Double.isFinite(snapshot.fundingRate())
+                || !(snapshot.markPrice() > 0)) {
+            return List.of();
+        }
+        List<UUID> owners = positions.entrySet().stream()
+                .filter(entry -> entry.getValue().containsKey(snapshot.symbol())).map(Map.Entry::getKey).sorted().toList();
+        List<FundingRecord> settled = new ArrayList<>(owners.size());
+        for (UUID player : owners) {
+            settled.add(settle(player, positions.get(player).get(snapshot.symbol()), snapshot));
+        }
+        return settled;
+    }
+
+    private FundingRecord settle(UUID player, Position position, MarketSnapshot snapshot) {
+        Money notional = notional(snapshot.markPrice(), position.lots(), position.quantityDecimals());
+        // 站在玩家一侧：费率为正、多头 → 付出；资金费 = 名义价值 × 费率，四舍五入到最小金额单位
+        long owed = BigDecimal.valueOf(notional.units()).multiply(BigDecimal.valueOf(snapshot.fundingRate()))
+                .multiply(BigDecimal.valueOf(position.side().sign())).setScale(0, RoundingMode.HALF_UP).longValueExact();
+        boolean cross = position.mode() == MarginMode.CROSS;
+        Money due = Money.ofUnits(Math.abs(owed));
+        Money moved;
+        if (owed > 0) {
+            Money available = cross ? accounts.balance(player) : position.margin();
+            moved = due.compareTo(available) <= 0 ? due : available;
+            if (moved.isPositive()) {
+                if (cross) {
+                    accounts.withdraw(player, moved);
+                } else {
+                    positions.get(player).put(position.symbol(), position.withMargin(position.margin().minus(moved)));
+                }
+                pool.receive(moved);
+            }
+        } else {
+            moved = pool.payUpTo(due);
+            if (moved.isPositive()) {
+                if (cross) {
+                    accounts.deposit(player, moved);
+                } else {
+                    positions.get(player).put(position.symbol(), position.withMargin(position.margin().plus(moved)));
+                }
+            }
+        }
+        FundingRecord record = new FundingRecord(++lastFundingId, player, position.symbol(), position.side(),
+                position.mode(), position.lots(), snapshot.fundingRate(), snapshot.markPrice(), notional,
+                owed > 0 ? Money.ZERO.minus(moved) : moved, due.minus(moved), snapshot.time().totalSeconds());
+        List<FundingRecord> history = funding.computeIfAbsent(player, p -> new ArrayList<>());
+        history.add(record);
+        if (history.size() > MAX_FUNDING_PER_PLAYER) {
+            history.remove(0);
+        }
+        return record;
     }
 
     /** 给成交编号并记入玩家的成交历史。 */
