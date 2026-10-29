@@ -39,6 +39,7 @@ import net.neoforged.fml.loading.FMLPaths;
  * （{@code quantity_decimals}，默认 3 位）、流动性深度（{@code depth_slippage}，名义价值 10,000 CRP 的市价单的平均滑点，
  * 默认 0.001 即 0.1%，0 表示无限深）和维持保证金分档（{@code maintenance_tiers}，默认按最高杠杆推出五档）五项可以不写，
  * 写了就按写的算；已存在的配置文件缺这些字段时不会被改写。
+ * 另有持仓总量上限比例（{@code open_interest_ratio}，默认 0.5）：该合约全体玩家未平仓名义价值之和不得超过流动性池权益乘以它（#17）。
  * 分档是数组，每档 {@code up_to}（名义价值上界，CRP）、{@code max_leverage}、{@code maintenance_rate}；
  * 上界递增、杠杆不升、费率不降，第一档的杠杆必须等于 {@code max_leverage}，最后一档的上界就是单个仓位的名义价值上限。
  * <p>
@@ -82,15 +83,17 @@ public final class ContractConfig {
             Codec.INT.optionalFieldOf("quantity_decimals").forGetter(spec -> Optional.of(spec.quantityDecimals())),
             Codec.DOUBLE.optionalFieldOf("depth_slippage").forGetter(spec -> Optional.of(spec.depthSlippage())),
             TIER_CODEC.listOf().optionalFieldOf("maintenance_tiers")
-                    .forGetter(spec -> Optional.of(spec.marginTiers().definitions())))
+                    .forGetter(spec -> Optional.of(spec.marginTiers().definitions())),
+            Codec.DOUBLE.optionalFieldOf("open_interest_ratio").forGetter(spec -> Optional.of(spec.openInterestRatio())))
             .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals,
-                    depthSlippage, tiers) ->
+                    depthSlippage, tiers, openInterestRatio) ->
                     new ContractSpec(symbol, underlying, initialPrice, baseVolume, volatility,
                             spread.orElseGet(() -> ContractSpec.defaultSpread(initialPrice)),
                             maxLeverage.orElse(ContractSpec.DEFAULT_MAX_LEVERAGE),
                             quantityDecimals.orElse(ContractSpec.DEFAULT_QUANTITY_DECIMALS),
                             depthSlippage.orElse(ContractSpec.DEFAULT_DEPTH_SLIPPAGE),
-                            tiers.map(MarginTiers::of).orElse(null))));
+                            tiers.map(MarginTiers::of).orElse(null),
+                            openInterestRatio.orElse(ContractSpec.DEFAULT_OPEN_INTEREST_RATIO))));
 
     private ContractConfig() {
     }

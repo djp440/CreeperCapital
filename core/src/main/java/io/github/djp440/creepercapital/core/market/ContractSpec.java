@@ -17,10 +17,11 @@ import java.util.regex.Pattern;
  * @param depthSlippage 流动性深度：名义价值 10,000 CRP 的市价单的平均滑点（比例，相对买一价/卖一价，不含半个点差），见 {@link LiquidityCurve}；0 表示无限深
  * @param marginTiers  按名义价值分档的维持保证金与杠杆上限；传 null 时按最高杠杆取默认分档（{@link MarginTiers#standard}），
  *                     第一档的最高杠杆必须等于 {@code maxLeverage}
+ * @param openInterestRatio 持仓总量上限比例（#17）：这个合约全体玩家未平仓名义价值之和不得超过 流动性池权益 × 该比例；缺省 50%
  */
 public record ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
         VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals, double depthSlippage,
-        MarginTiers marginTiers) {
+        MarginTiers marginTiers, double openInterestRatio) {
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]*CRP");
     /** 没有配置点差时，点差取起始价格的这个比例。 */
     private static final double DEFAULT_SPREAD_RATIO = 0.0005;
@@ -29,6 +30,8 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
     public static final int DEFAULT_QUANTITY_DECIMALS = 3;
     /** 没有配置流动性深度时，10,000 CRP 市价单的滑点取 0.1%。 */
     public static final double DEFAULT_DEPTH_SLIPPAGE = 0.001;
+    /** 没有配置持仓总量上限比例时取流动性池权益的 50%。 */
+    public static final double DEFAULT_OPEN_INTEREST_RATIO = 0.5;
     private static final int MAX_QUANTITY_DECIMALS = 6;
 
     public ContractSpec {
@@ -58,6 +61,9 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
             throw new IllegalArgumentException(
                     "合约 " + symbol + " 的流动性深度（滑点）必须在 0（含）到 " + LiquidityCurve.MAX_DEPTH_SLIPPAGE + "（不含）之间：" + depthSlippage);
         }
+        if (!(openInterestRatio > 0) || openInterestRatio > 1) {
+            throw new IllegalArgumentException("合约 " + symbol + " 的持仓总量上限比例必须在 0（不含）到 1 之间：" + openInterestRatio);
+        }
         if (marginTiers == null) {
             marginTiers = MarginTiers.standard(maxLeverage);
         } else if (marginTiers.maxLeverage() != maxLeverage) {
@@ -68,18 +74,26 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
         IndexModel.Calibration.of(symbol, initialPrice, volatility);
     }
 
+    /** 持仓总量上限比例取默认的 50%。 */
+    public ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
+            VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals, double depthSlippage,
+            MarginTiers marginTiers) {
+        this(symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals,
+                depthSlippage, marginTiers, DEFAULT_OPEN_INTEREST_RATIO);
+    }
+
     /** 维持保证金分档取默认值（按最高杠杆推出）。 */
     public ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
             VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals, double depthSlippage) {
         this(symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals,
-                depthSlippage, null);
+                depthSlippage, null, DEFAULT_OPEN_INTEREST_RATIO);
     }
 
     /** 没有指定流动性深度：取默认滑点。 */
     public ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
             VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals) {
         this(symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals,
-                DEFAULT_DEPTH_SLIPPAGE, null);
+                DEFAULT_DEPTH_SLIPPAGE, null, DEFAULT_OPEN_INTEREST_RATIO);
     }
 
     /** 交易参数取默认值：点差为起始价格的 0.05%，最高 20 倍杠杆，数量精度 3 位，滑点 0.1%。 */

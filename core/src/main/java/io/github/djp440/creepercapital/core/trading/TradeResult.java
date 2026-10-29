@@ -54,7 +54,9 @@ public sealed interface TradeResult {
         /** 挂着的委托已达上限；参数：上限。 */
         TOO_MANY_ORDERS,
         /** 止盈止损的触发价不合法（不是正数，或按当前价格会立即触发：多仓止盈须高于、止损须低于参考价，空仓相反）；参数：参考价。 */
-        INVALID_TRIGGER_PRICE
+        INVALID_TRIGGER_PRICE,
+        /** 开仓后这个合约全体玩家的未平仓名义价值会超过持仓总量上限（流动性池权益 × 比例）；参数：当前上限（CRP）。 */
+        OPEN_INTEREST_LIMIT
     }
 
     static TradeResult reject(Reason reason, String... args) {

@@ -31,7 +31,10 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
  * <p>
  * 强平在每个行情步由 {@link #checkLiquidations} 检查（#12），所以正常平仓前仓位已被强平线拦住；平仓时逐仓亏损仍封顶为该仓位的保证金，
  * 全仓亏损封顶为保证金加账户里的全部余额，余额不会为负，是跳空来不及强平时的兜底。
- * 流动性池无力付出盈利时（见 #17，ADL）最多付出池子的全部余额。
+ * 流动性池权益（池子现金减去玩家未实现盈亏）为负时，每个行情步的 {@link #checkSolvency} 按 ADL 排名缩减盈利仓位（#17，见 ADR-0007），
+ * 所以正常情况下池子付得出玩家平仓的盈利；极端情形下池子现金仍不足以兑现某一笔平仓盈利（权益为正，但玩家亏损的保证金还没流入池子）时，
+ * 最多付出池子的全部余额，这是最后的兜底，不会让池子余额为负。
+ * 开仓受持仓总量上限约束（{@link #openInterestCap}）。
  * <p>
  * 维持保证金、保证金率和强平价的公式在 {@link MarginMath}，分档在合约的 {@link MarginTiers}，这里不重复。
  */
@@ -346,6 +349,11 @@ public final class TradingBook {
             if (total.compareTo(limit) > 0) {
                 return TradeResult.reject(TradeResult.Reason.POSITION_LIMIT, limit.toDisplayString());
             }
+            // 持仓总量上限：全体玩家（含这一笔）的名义价值，限价挂单成交时也在这里复检
+            TradeResult overCap = checkOpenInterest(spec, lots, price, markPrice);
+            if (overCap != null) {
+                return overCap;
+            }
             margin = Money.ofUnits(ceilDiv(notional.units(), leverage));
             fee = fee(notional, feeRate);
             required = margin.plus(fee);
@@ -421,13 +429,11 @@ public final class TradingBook {
      */
     TradeResult closeAt(UUID player, Position position, ContractSpec spec, long marketSeconds, long lots, double price,
             BigDecimal feeRate) {
-        Money releasedMargin = lots == position.lots() ? position.margin()
-                : Money.ofUnits(BigDecimal.valueOf(position.margin().units()).multiply(BigDecimal.valueOf(lots))
-                        .divide(BigDecimal.valueOf(position.lots()), 0, RoundingMode.FLOOR).longValueExact());
+        Money releasedMargin = releasedMargin(position, lots);
         Money pnl = Position.pnl(position.side(), position.entryPrice(), price, lots, spec.quantityDecimals());
         Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()), feeRate);
         // 逐仓：亏损最多亏到这部分仓位的保证金；全仓：亏损最多亏到保证金加账户里的空闲余额（没有强平前余额不会为负）。
-        // 盈利由池子付，池子不够就付出它的全部余额
+        // 盈利由池子付；权益不足的情形由每步的 ADL 处理，这里池子现金不够时只是最后的兜底：付出它的全部余额
         boolean cross = position.mode() == MarginMode.CROSS;
         Money free = cross ? accounts.balance(player) : Money.ZERO;
         Money realized;
@@ -479,7 +485,7 @@ public final class TradingBook {
      * </ul>
      * 强平按标记价格成交（不走流动性曲线，也没有滑点）。结算：抵押先抵亏损（亏损归池子，池子是对手方），剩下的（含清算费）全进风险保障基金；
      * 亏损超过抵押即穿仓，超出部分先由基金垫付给池子，基金不够池子就少收，玩家余额不会为负。盈利（分档变化导致盈利仓位也到强平线的极端情形）
-     * 由池子付，付不出就付全部余额，等 #17 的自动减仓接管。
+     * 由池子付，付不出就付全部余额（权益不足由随后的 {@link #checkSolvency} 处理，见 #17）。
      *
      * @param markPrice     各合约当前的标记价格；返回 NaN 或非正数（合约已不在配置里）的仓位不参与检查
      * @param tiers         各合约的维持保证金分档
@@ -596,6 +602,201 @@ public final class TradingBook {
         Money covered = fund.payUpTo(shortfall);
         pool.receive(collateral.plus(covered));
         return new Settlement(Money.ZERO, shortfall, covered, shortfall.minus(covered));
+    }
+
+    // ---- 持仓总量上限与自动减仓（#17） ----
+
+    /**
+     * 流动性池权益 = 池子现金 − 全体玩家仓位的未实现盈亏（按标记价格）。玩家赚的是池子欠的，玩家亏的是池子将收的，所以池子权益随玩家盈亏变化。
+     * 亏损的仓位最多算到它的保证金（池子最多收到这么多；穿仓由强平和风险保障基金处理），盈利的仓位不设上限。
+     * 没有标记价格（合约已不在配置里）的仓位按盈亏 0 算。
+     * <p>
+     * 权益为负就是池子付不起全部盈利，每个行情步由 {@link #checkSolvency} 用自动减仓补回来。
+     *
+     * @param markPrice 各合约当前的标记价格
+     */
+    public Money poolEquity(ToDoubleFunction<String> markPrice) {
+        Money equity = pool.balance();
+        for (Map<String, Position> owned : positions.values()) {
+            for (Position position : owned.values()) {
+                equity = equity.minus(poolLiability(position, markPrice.applyAsDouble(position.symbol())));
+            }
+        }
+        return equity;
+    }
+
+    /** 一个仓位对池子权益的影响（池子欠玩家的）：浮盈为正，浮亏为负且最多到保证金。 */
+    private static Money poolLiability(Position position, double mark) {
+        if (!hasMark(mark)) {
+            return Money.ZERO;
+        }
+        Money pnl = position.pnlAt(mark);
+        Money floor = Money.ZERO.minus(position.margin());
+        return pnl.compareTo(floor) < 0 ? floor : pnl;
+    }
+
+    private static boolean hasMark(double mark) {
+        return Double.isFinite(mark) && mark > 0;
+    }
+
+    /** 这个合约全体玩家的未平仓数量（手）之和。 */
+    public long openLots(String symbol) {
+        long total = 0;
+        for (Map<String, Position> owned : positions.values()) {
+            Position position = owned.get(symbol);
+            if (position != null) {
+                total = Math.addExact(total, position.lots());
+            }
+        }
+        return total;
+    }
+
+    /** 这个合约全体玩家的未平仓名义价值之和：全部数量按同一个价格估值（多空都算正）。 */
+    public Money openInterest(ContractSpec spec, double price) {
+        return notional(price, openLots(spec.symbol()), spec.quantityDecimals());
+    }
+
+    /**
+     * 这个合约的持仓总量上限 = 流动性池权益 × 合约配置的比例（缺省 50%），向下取整到最小金额单位；权益不为正时为 0。
+     * 每个合约各自受自己的上限约束，各合约的上限都按同一个池子的权益算（首版全体合约共享一个池子）。
+     */
+    public Money openInterestCap(ContractSpec spec, ToDoubleFunction<String> markPrice) {
+        Money equity = poolEquity(markPrice);
+        if (!equity.isPositive()) {
+            return Money.ZERO;
+        }
+        return Money.ofUnits(BigDecimal.valueOf(equity.units()).multiply(BigDecimal.valueOf(spec.openInterestRatio()))
+                .setScale(0, RoundingMode.FLOOR).longValueExact());
+    }
+
+    /**
+     * 开仓（含加仓）会不会让这个合约全体玩家的名义价值超过上限；超过返回拒单（参数：上限），否则返回 null。
+     * 名义价值按这一笔的价格估值（包括别的玩家已有的仓位）。平仓、减仓、止盈止损和强平不调用它，不受限。
+     * 限价委托挂单时检查一次，挂单成交时（{@link #openAt}）再检查一次：成交时池子权益可能已变，超限则撤单。
+     */
+    TradeResult checkOpenInterest(ContractSpec spec, long addLots, double price, ToDoubleFunction<String> markPrice) {
+        Money cap = openInterestCap(spec, markPrice);
+        Money after = notional(price, Math.addExact(openLots(spec.symbol()), addLots), spec.quantityDecimals());
+        return after.compareTo(cap) > 0
+                ? TradeResult.reject(TradeResult.Reason.OPEN_INTEREST_LIMIT, cap.toDisplayString()) : null;
+    }
+
+    /**
+     * 此刻的 ADL 排名：全服盈利仓位按 盈利率（浮盈 / 保证金）× 杠杆 从高到低。自动减仓的顺序与仓位页的五档指示灯都读它。
+     * 没有标记价格的合约不参与。
+     */
+    public AdlRanking adlRanking(ToDoubleFunction<String> markPrice) {
+        List<AdlRanking.Candidate> candidates = new ArrayList<>();
+        positions.forEach((player, owned) -> owned.values().forEach(position -> {
+            double mark = markPrice.applyAsDouble(position.symbol());
+            if (!hasMark(mark)) {
+                return;
+            }
+            Money pnl = position.pnlAt(mark);
+            if (!pnl.isPositive()) {
+                return;
+            }
+            double margin = Math.max(1, position.margin().units());
+            candidates.add(new AdlRanking.Candidate(player, position.symbol(), position.side(), position.lots(), pnl,
+                    pnl.units() / margin * position.leverage()));
+        }));
+        return AdlRanking.of(candidates);
+    }
+
+    /**
+     * 偿付检查（行情步的第 ④ 阶段，接在强平之后）：池子权益为负时自动减仓（ADL），直到权益不再为负。
+     * <p>
+     * 按 {@link #adlRanking} 的名次从前往后，以<b>开仓价</b>强制缩减盈利仓位：被缩减部分的浮盈归零（池子不用再付），
+     * 保证金退回玩家可用余额，不收手续费；最后一个只缩减到权益恰好回到非负所需的最少手数。池子现金不变，权益每一步都
+     * 增加被缩减部分的浮盈，所以总能恢复（盈利全部抹掉后权益 = 池子现金 + 亏损仓位的保证金 ≥ 0）。
+     * 玩家 + 池子 + 基金的总额不变，玩家余额不会为负。
+     * <p>
+     * 减仓是一笔成交（{@link TradeKind#ADL}，价格为开仓价、手续费和已实现盈亏为 0），仓位被减光时附带的只减仓 / 止盈止损委托随之失效。
+     *
+     * @return 这一步发生的自动减仓，按名次先后；权益不为负时为空
+     */
+    public List<AutoDeleverageEvent> checkSolvency(ToDoubleFunction<String> markPrice, long marketSeconds) {
+        return checkSolvency(player -> true, markPrice, marketSeconds);
+    }
+
+    /** 同上，但只缩减 {@code players} 允许的玩家的仓位（GameTest 共用一个活账本，借此把人为制造的极端行情限定在测试自己的玩家上）。 */
+    public List<AutoDeleverageEvent> checkSolvency(Predicate<UUID> players, ToDoubleFunction<String> markPrice,
+            long marketSeconds) {
+        List<AutoDeleverageEvent> events = new ArrayList<>();
+        if (poolEquity(markPrice).units() >= 0) {
+            return events;
+        }
+        for (AdlRanking.Entry entry : adlRanking(markPrice).entries()) {
+            Money deficit = Money.ZERO.minus(poolEquity(markPrice));
+            if (!deficit.isPositive()) {
+                break;
+            }
+            Position position = position(entry.player(), entry.symbol()).orElse(null);
+            if (position == null || !players.test(entry.player())) {
+                continue;
+            }
+            double mark = markPrice.applyAsDouble(entry.symbol());
+            events.add(deleverage(entry, position, lotsToCover(position, mark, deficit), mark, marketSeconds));
+        }
+        return events;
+    }
+
+    /** 缩减多少手才能让权益至少回升 {@code deficit}：最少的手数，盈利不够就全部缩减。 */
+    private static long lotsToCover(Position position, double mark, Money deficit) {
+        Money whole = position.pnlAt(mark);
+        if (whole.compareTo(deficit) <= 0) {
+            return position.lots();
+        }
+        // 缩减 n 手使权益回升 whole − 剩余部分的浮盈；它随 n 单调不减，二分找最小的 n
+        long low = 1;
+        long high = position.lots();
+        while (low < high) {
+            long mid = low + (high - low) / 2;
+            if (recovered(position, mark, mid).compareTo(deficit) >= 0) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        return low;
+    }
+
+    /** 缩减 {@code lots} 手之后池子权益的回升量：缩减前的浮盈 − 剩余部分的浮盈。 */
+    private static Money recovered(Position position, double mark, long lots) {
+        long remaining = position.lots() - lots;
+        Money left = remaining == 0 ? Money.ZERO
+                : Position.pnl(position.side(), position.entryPrice(), mark, remaining, position.quantityDecimals());
+        return position.pnlAt(mark).minus(left);
+    }
+
+    private AutoDeleverageEvent deleverage(AdlRanking.Entry entry, Position position, long lots, double mark,
+            long marketSeconds) {
+        UUID player = entry.player();
+        Money released = releasedMargin(position, lots);
+        Money lost = recovered(position, mark, lots);
+        if (released.isPositive()) {
+            accounts.deposit(player, released);
+        }
+        Map<String, Position> own = positions.get(player);
+        long remaining = position.lots() - lots;
+        if (remaining == 0) {
+            own.remove(position.symbol());
+            orders.onPositionClosed(player, position.symbol(), marketSeconds);
+        } else {
+            own.put(position.symbol(), new Position(position.symbol(), position.side(), remaining, position.entryPrice(),
+                    position.leverage(), position.margin().minus(released), position.quantityDecimals(), position.mode()));
+        }
+        PlayerTrade trade = ((TradeResult.Filled) record(new PlayerTrade(0, player, position.symbol(), position.side(),
+                TradeKind.ADL, position.entryPrice(), lots, Money.ZERO, Money.ZERO, marketSeconds))).trade();
+        return new AutoDeleverageEvent(player, position.symbol(), position.side(), position.mode(), lots, remaining,
+                position.entryPrice(), mark, lost, released, entry.rank(), trade.id(), marketSeconds);
+    }
+
+    /** 缩减 {@code lots} 手时退回的保证金：全部缩减退回剩余全部，部分缩减按手数比例向下取整。 */
+    private static Money releasedMargin(Position position, long lots) {
+        return lots == position.lots() ? position.margin()
+                : Money.ofUnits(BigDecimal.valueOf(position.margin().units()).multiply(BigDecimal.valueOf(lots))
+                        .divide(BigDecimal.valueOf(position.lots()), 0, RoundingMode.FLOOR).longValueExact());
     }
 
     // ---- 资金费（#13） ----
