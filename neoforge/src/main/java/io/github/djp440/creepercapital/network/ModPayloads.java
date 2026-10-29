@@ -10,7 +10,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * 本模组的网络载荷。客户端处理器在 {@code CreeperCapitalClient} 里单独注册，专用服务端不加载客户端类。
  */
 public final class ModPayloads {
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
 
     private ModPayloads() {
     }

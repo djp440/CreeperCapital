@@ -13,10 +13,6 @@ final class RandomWalkIndexPrice {
     private final MarketRandom random;
     private double price;
 
-    RandomWalkIndexPrice(double initialPrice, long seed) {
-        this(initialPrice, new MarketRandom(seed));
-    }
-
     RandomWalkIndexPrice(double price, MarketRandom random) {
         this.price = price;
         this.random = random;
@@ -24,11 +20,6 @@ final class RandomWalkIndexPrice {
 
     double current() {
         return price;
-    }
-
-    /** 随机数发生器当前的状态，随存档保存。 */
-    long randomState() {
-        return random.state();
     }
 
     /** 走一个行情步。 */

@@ -18,6 +18,9 @@ public record MarketSnapshotPayload(MarketSnapshot snapshot) implements CustomPa
             ByteBufCodecs.VAR_LONG, MarketSnapshot::step,
             ByteBufCodecs.STRING_UTF8, MarketSnapshot::symbol,
             ByteBufCodecs.DOUBLE, MarketSnapshot::indexPrice,
+            ByteBufCodecs.DOUBLE, MarketSnapshot::lastPrice,
+            ByteBufCodecs.DOUBLE, MarketSnapshot::markPrice,
+            ByteBufCodecs.DOUBLE, MarketSnapshot::fundingRate,
             MarketSnapshot::new);
 
     public static final StreamCodec<ByteBuf, MarketSnapshotPayload> STREAM_CODEC =

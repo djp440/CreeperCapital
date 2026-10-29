@@ -14,7 +14,9 @@ public final class Market {
     private static final String SYMBOL = "DIAMONDCRP";
     private static final double INITIAL_INDEX_PRICE = 1000.0;
 
+    private final MarketRandom random;
     private final RandomWalkIndexPrice indexPrice;
+    private final ContractPricing pricing;
     private int ticksIntoStep;
     private long step;
     private boolean paused;
@@ -23,11 +25,15 @@ public final class Market {
      * @param seed 行情随机数种子，同一种子走出同一条行情
      */
     public Market(long seed) {
-        this.indexPrice = new RandomWalkIndexPrice(INITIAL_INDEX_PRICE, seed);
+        this.random = new MarketRandom(seed);
+        this.indexPrice = new RandomWalkIndexPrice(INITIAL_INDEX_PRICE, random);
+        this.pricing = new ContractPricing(PricingState.INITIAL);
     }
 
     private Market(MarketState state) {
-        this.indexPrice = new RandomWalkIndexPrice(state.indexPrice(), new MarketRandom(state.randomState()));
+        this.random = new MarketRandom(state.randomState());
+        this.indexPrice = new RandomWalkIndexPrice(state.indexPrice(), random);
+        this.pricing = new ContractPricing(state.pricing());
         this.ticksIntoStep = state.ticksIntoStep();
         this.step = state.step();
         this.paused = state.paused();
@@ -40,7 +46,7 @@ public final class Market {
 
     /** 需要持久化的全部状态，包括是否暂停。 */
     public MarketState state() {
-        return new MarketState(step, ticksIntoStep, indexPrice.current(), indexPrice.randomState(), paused);
+        return new MarketState(step, ticksIntoStep, indexPrice.current(), random.state(), paused, pricing.state());
     }
 
     /**
@@ -57,8 +63,10 @@ public final class Market {
             return Optional.empty();
         }
         ticksIntoStep = 0;
+        MarketTime previous = MarketTime.ofStep(step);
         step++;
         indexPrice.next();
+        pricing.next(previous, MarketTime.ofStep(step), indexPrice.current(), random);
         return Optional.of(snapshot());
     }
 
@@ -75,6 +83,8 @@ public final class Market {
     }
 
     public MarketSnapshot snapshot() {
-        return new MarketSnapshot(step, SYMBOL, indexPrice.current());
+        double index = indexPrice.current();
+        return new MarketSnapshot(step, SYMBOL, index, pricing.lastPrice(index),
+                pricing.markPrice(index, MarketTime.ofStep(step)), pricing.fundingRate());
     }
 }
