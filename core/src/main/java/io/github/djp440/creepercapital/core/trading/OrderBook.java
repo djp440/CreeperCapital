@@ -21,9 +21,10 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 /**
  * 全服的委托：限价单、只减仓限价单、止盈止损的挂单、撤单，以及每个行情步按新价格触发成交。由 {@link TradingBook#orders()} 持有。
  * <p>
- * 价格口径：买单在可成交买价（最新价 + 半个点差）不高于委托价时穿越，卖单在可成交卖价（最新价 − 半个点差）
- * 不低于委托价时穿越；穿越（含一步跳过委托价的跳空）一律按委托价成交，收 maker 费。下单时就能成交的委托
- * 按当前可成交价成交，收 taker 费（和市价单走同一个成交价入口，不在这里另算）。
+ * 价格口径：买单在盘口第一档（卖一价 = 最新价 + 半个点差）不高于委托价时穿越，卖单在第一档（买一价 = 最新价 − 半个点差）
+ * 不低于委托价时穿越，只看最优价、不看整单吃单的均价；穿越（含一步跳过委托价的跳空）一律按委托价成交，收 maker 费。
+ * 下单时就能成交的委托收 taker 费，成交价是同数量市价单的曲线均价（和市价单走同一个成交价入口，不在这里另算），
+ * 但不比委托价差：均价越过委托价时封顶在委托价。
  * <p>
  * 资金：挂单时把保证金与预估手续费（{@link TradingBook#frozenFor}）从可用余额划进委托的 {@link Order#frozen()}，
  * 守恒恒等式变为 可用余额 + 冻结 + 仓位保证金 + 池子 不变。撤单把冻结原数划回；成交时先划回再按委托价开仓，
@@ -151,12 +152,16 @@ public final class OrderBook {
         }
         OrderExtras extras = new OrderExtras(false, protection.source(), protection.takeProfit(), protection.stopLoss());
         long now = snapshot.time().totalSeconds();
-        if (crosses(spec, snapshot, side, TradeKind.OPEN, lots, price)) {
+        if (crosses(spec, snapshot, side, TradeKind.OPEN, price)) {
             TradeResult full = checkCapacity(player, count(protection));
             if (full != null) {
                 return full;
             }
-            TradeResult result = book.open(player, spec, snapshot, side, lots, leverage, markPrice);
+            double fill = takerPrice(spec, snapshot, side, TradeKind.OPEN, lots, price);
+            if (!(fill > 0)) {
+                return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
+            }
+            TradeResult result = book.openAt(player, spec, now, side, lots, leverage, fill, TAKER_FEE, markPrice);
             if (result instanceof TradeResult.Filled filled) {
                 PlayerTrade trade = filled.trade();
                 remember(new Order(++lastOrderId, player, spec.symbol(), side, OrderType.LIMIT, price, lots, leverage,
@@ -180,7 +185,8 @@ public final class OrderBook {
         } catch (ArithmeticException e) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
-        Money available = accounts.balance(player);
+        // 和 openAt 同一个口径：全仓浮亏占用可用余额，否则挂得出去的单子成交时会因余额不足被撤
+        Money available = book.assets(player, markPrice).availableBalance();
         if (available.compareTo(frozen) < 0) {
             return TradeResult.reject(TradeResult.Reason.INSUFFICIENT_BALANCE, frozen.toDisplayString(),
                     available.toDisplayString());
@@ -273,8 +279,12 @@ public final class OrderBook {
         long now = snapshot.time().totalSeconds();
         long executable = Math.min(lots, position.lots());
         OrderExtras extras = new OrderExtras(true, TriggerSource.LAST, 0, 0);
-        if (crosses(spec, snapshot, position.side(), TradeKind.CLOSE, executable, price)) {
-            TradeResult result = book.close(player, spec, snapshot, executable);
+        if (crosses(spec, snapshot, position.side(), TradeKind.CLOSE, price)) {
+            double fill = takerPrice(spec, snapshot, position.side(), TradeKind.CLOSE, executable, price);
+            if (!(fill > 0)) {
+                return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
+            }
+            TradeResult result = book.closeAt(player, position, spec, now, executable, fill, TAKER_FEE);
             if (result instanceof TradeResult.Filled filled) {
                 PlayerTrade trade = filled.trade();
                 remember(new Order(++lastOrderId, player, spec.symbol(), position.side(), OrderType.LIMIT, price, executable,
@@ -404,11 +414,10 @@ public final class OrderBook {
                     events.add(cancel(order, CancelReason.POSITION_CLOSED, now));
                 } else if (order.type().isTrigger()) {
                     trigger(order, position, spec, snapshot, events);
-                } else if (crosses(spec, snapshot, position.side(), TradeKind.CLOSE, Math.min(order.lots(), position.lots()),
-                        order.price())) {
+                } else if (crosses(spec, snapshot, position.side(), TradeKind.CLOSE, order.price())) {
                     fillReduceOnlyLimit(order, position, spec, now, events);
                 }
-            } else if (crosses(spec, snapshot, order.side(), TradeKind.OPEN, order.lots(), order.price())) {
+            } else if (crosses(spec, snapshot, order.side(), TradeKind.OPEN, order.price())) {
                 events.add(fill(order, spec, now, markPrice));
             }
             events.addAll(takeEvents());
@@ -426,18 +435,32 @@ public final class OrderBook {
     }
 
     /**
-     * 此刻是否穿越：这么多手按市价吃单的均价（含半个点差和滑点，唯一成交价入口）不比委托价差，
-     * 即买入（开多、平空）均价不高于委托价、卖出（开空、平多）均价不低于委托价。用数量算而不是只看第一档，保证“下单即成交”的 taker 成交价
-     * 永远不会比委托价差；代价是大单要等价格更深地越过委托价才会触发。
+     * 此刻是否穿越：只看盘口第一档（最优价，含半个点差，不含滑点）不比委托价差，
+     * 即买入（开多、平空）的卖一价不高于委托价、卖出（开空、平多）的买一价不低于委托价。
+     * 不看整单吃单的均价：委托价是被动成交的价格，大单的滑点只影响下单即成交（taker）那部分，见 {@link #takerPrice}。
      */
-    private static boolean crosses(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, long lots,
-            double price) {
-        double quote = TradingBook.fillPrice(spec, snapshot, side, kind, lots);
-        if (!(quote > 0)) {
+    private static boolean crosses(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, double price) {
+        double last = snapshot.lastPrice();
+        if (!(last > 0) || !Double.isFinite(last)) {
             return false;
         }
         boolean buy = (side == Side.LONG) == (kind == TradeKind.OPEN);
-        return buy ? quote <= price : quote >= price;
+        double touch = spec.liquidityCurve(last).touchPrice(buy);
+        return buy ? touch <= price : touch >= price;
+    }
+
+    /**
+     * 下单即成交（taker）的成交价：同数量市价单的曲线均价（{@link TradingBook#fillPrice}，唯一成交价入口），
+     * 但限价单不会比委托价更差，均价越过委托价时封顶在委托价。算不出有限正价格时返回 NaN。
+     */
+    private static double takerPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, long lots,
+            double limit) {
+        double average = TradingBook.fillPrice(spec, snapshot, side, kind, lots);
+        if (!(average > 0)) {
+            return Double.NaN;
+        }
+        boolean buy = (side == Side.LONG) == (kind == TradeKind.OPEN);
+        return buy ? Math.min(average, limit) : Math.max(average, limit);
     }
 
     /** 止盈止损：触发价到了就按市价平仓（数量按仓位缩减），产出触发与成交事件；价格算不出来时保持挂着，下个行情步再试。 */

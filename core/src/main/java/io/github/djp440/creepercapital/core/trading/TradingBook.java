@@ -481,8 +481,8 @@ public final class TradingBook {
      * 用 {@link MarginMath#assess} 算保证金率（仓位页展示的强平价和这里触发强平的是同一套公式），达到 100% 就强平：
      * <ul>
      * <li>逐仓：只看这个仓位自己，强平它；该合约的挂单一并撤销（冻结退回可用余额）。玩家抵押的是这个仓位的保证金。</li>
-     * <li>全仓：所有全仓仓位共用一个保证金率，一起强平；玩家全部挂单撤销（冻结本来就计入全仓钱包），
-     * 抵押是整个全仓钱包（全仓仓位的保证金 + 全部可用余额），强平后可用余额归零。</li>
+     * <li>全仓：所有全仓仓位共用一个保证金率，一起强平；全仓合约的挂单撤销（冻结本来就计入全仓钱包），逐仓合约的挂单不动，
+     * 抵押是整个全仓钱包（全仓仓位的保证金 + 撤单退回后的全部可用余额），强平后可用余额归零。</li>
      * </ul>
      * 强平按标记价格成交（不走流动性曲线，也没有滑点）。结算：抵押先抵亏损（亏损归池子，池子是对手方），剩下的（含清算费）全进风险保障基金；
      * 亏损超过抵押即穿仓，超出部分先由基金垫付给池子，基金不够池子就少收，玩家余额不会为负。盈利（分档变化导致盈利仓位也到强平线的极端情形）
@@ -538,8 +538,10 @@ public final class TradingBook {
 
     private LiquidationEvent liquidate(UUID player, MarginMode mode, List<Position> closing,
             ToDoubleFunction<String> markPrice, long marketSeconds) {
-        // 先撤挂单：冻结的资金退回可用余额。全仓钱包本来就含冻结，所以全仓撤全部，逐仓只撤这个合约的
-        Predicate<String> scope = mode == MarginMode.CROSS ? symbol -> true : closing.get(0).symbol()::equals;
+        // 先撤挂单：冻结的资金退回可用余额。全仓钱包本来就含全仓合约挂单的冻结，所以全仓撤全仓合约的挂单；
+        // 逐仓合约的挂单冻的是它自己的保证金，不是全仓抵押，全仓强平不能动（否则退回后会被当全仓抵押没收）。逐仓强平只撤这个合约的
+        Predicate<String> scope = mode == MarginMode.CROSS ? symbol -> marginMode(player, symbol) == MarginMode.CROSS
+                : closing.get(0).symbol()::equals;
         List<OrderEvent> cancelled = orders.cancelWhere(player, scope, CancelReason.LIQUIDATED, marketSeconds);
 
         Money collateral = Money.ZERO;
