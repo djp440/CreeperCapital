@@ -8,6 +8,18 @@
 - 不覆盖：孤儿键、硬编码英文文案、译文质量（术语对 GLOSSARY 只能人工看）。测试用 `Path.of("")` 往上找仓库根，不用 `-D` 传路径（守护进程 `file.encoding=COMPAT`，中文路径经系统属性传递会损坏）。
 - 人工验收清单 `docs/checklist/v0.1-trading-feel.md`（16 节 41 项）。易错点：资金费每 8 市场小时约 80 真实分钟，只能靠 `market funding` 快进；`market advance` 跳过中间步的挂单 / 强平 / 资金费；`jump` 实际跳幅被标记价格平滑，一次不触发就再发；离线 / 重启 / 多人必须用专用服务端；持仓上限最易用 `"open_interest_ratio": 0.01` 触发；ADL 需池子对盈利付不起（1x 约 40 万名义 + `jump +300`）。
 
+## 2026-10-29 20:05 #20 界面还原打磨与涨跌色切换（feat/20-ui-polish）
+- 布局改成纯函数 `client/TradingLayout.compute(width, height, tickerRows)`：深色底上卡片式布局，卡片间距 `GAP = 4`；右侧下单面板**通栏到底**（宽 = 屏宽 26%，夹在 150～200），左侧上为图表（+ 盘口栏）、下为表格区（高 = 左侧高度 36%，夹在 64～260，且优先保证图表最小高度 100）。`TradingLayoutTest` 在 8 种窗口（854×480～2560×1440、1024×768、800×600）× GUI 缩放 0（自动）～4 换算出的界面尺寸，以及最小 320×240 上断言卡片互不重叠、不出屏、各自不小于最小尺寸。
+- 降级顺序（写在 `TradingLayout` 类注释里）：① 高度 < 330（1080p 自动缩放 480×270、1280×720 自动缩放 427×240 都算）省掉标题栏、行情栏只排一行；② 左侧放不下「图表 ≥ 220 + 盘口栏」时盘口 / 最新成交并进图表区，与 K 线同一页签条切换（`ColumnMode.TABBED`）；③ 表格列放不下时按优先级隐藏次要列（`LayoutFit.columns`），只剩必须列仍放不下就等比缩窄、文字「…」截断；④ 页签条依次试全名宽松 → 全名紧凑 → 短名（`table.*.short` 键）→ 最紧，仍放不下由裁剪兜底。
+- 行情栏 `LayoutFit.ticker`：按显示顺序排，最多 2 行（矮屏 1 行），超了按优先级从低到高丢（最新价 10 > 涨跌 9 > 标记价 8 > 资金费 7 > 市场时间 6 > 指数价 5 > 24h 高 4 > 低 3 > 成交量 2），排得下以后再按优先级从高到低把丢掉的逐个放回试（回填，避免丢了一项宽的以后留空白）。
+- 涨跌色：`ClientConfig`（NeoForge CLIENT 配置 `config/creepercapital-client.toml`，项 `colorScheme` = `GREEN_UP` | `RED_UP`，默认 `GREEN_UP`）+ `ColorScheme` 枚举。所有涨跌语义只走 `BinancePalette.up()/down()/side(Side)/signed(x)/direction(cur, prev)`，每次绘制时读配置，所以切换立即生效、无缓存。品牌黄（强平 / ADL 方向、资金费率、选中页签）与中性灰不随配色变。入口两个：① 交易界面行情栏卡片第一行最右端的按钮（两个色块 + 「绿涨红跌 / 红涨绿跌」），点击切换并写回配置；② 模组列表 → Creeper Capital → 配置（NeoForge `ConfigurationScreen`）→「涨跌色」。
+- 颜色口径：下单成功消息用中性白、失败固定红（不随配色，红在两种配色里都有「警示」含义）；保证金率 ≥ 50% 品牌黄、≥ 80% 用 `down()`；按钮「开多 / 买」用 `up()`，「开空 / 卖」用 `down()`；预估为空（未输数量）显示中性「--」，不着涨跌色。
+- 下单预估与实际成交同源：core 新增 `TradingBook.estimateOpen(params, lastPrice, side, lots, leverage)` → `Optional<OpenEstimate>`，内部调用与 `open` 相同的 `fillPrice` 曲线（深度滑点 + 点差）；面板显示「开多均价 / 开空均价」两行，保证金与手续费按名义价值较高的一侧（开多）显示，偏保守。`TradingBookTest` 3 例断言预估均价 = 实际开仓均价。
+- 玩家成交停留：`PlayerTradePins`，玩家成交到达后在「最新成交」顶部置顶区停留 **30 秒（真实时间）**，最多 **3 笔**、最多占半页，带品牌黄左边条与底色、第二行标「玩家 <名字>」；下方仍按时间倒序显示全部成交（含这几笔），时间线不被篡改。选这个方案而不是「玩家成交权重更高 / 少挤出」的理由：feed 本身保持诚实（全服可见、只保留最近 50 笔缓存不变），置顶只延长可见时间，不改服务端、不改载荷。
+- 金额显示：下单面板窄，余额 2 位小数（`MarketFormat.money`）；底部「资产」页显示账本精确值（`MarketFormat.balance`，最多 6 位小数、去尾零），一行放不下排成 2×2。
+- 截图：`runScreenshots` 支持 `-PscreenshotWidth/-PscreenshotHeight/-PscreenshotGuiScale`（缺省 1280×720、GUI 缩放 2；`0` = 自动），README 写明窗口与界面坐标尺寸。脚本 01～27 绿涨红跌（步骤 01 强制 `GREEN_UP`，不受本机配置影响），28～37 红涨绿跌覆盖全部面板（仓位、盘口、最新成交置顶、预估、限价、止盈止损、当前 / 历史委托、成交、资金费），38 切回绿涨红跌。新视图 `View.ORDER_BOOK` → `TradingScreen.openWithOrderBook()`。
+- 未改载荷，`PROTOCOL_VERSION` 不变。
+
 ## 2026-10-29 19:30 持仓总量上限与 ADL 的实现要点（#17）
 
 - 语义全文见 `docs/adr/0007-open-interest-cap-and-entry-price-adl.md`，这里只记实现。`TradingBook` 的 `checkOpenInterest` 在 `openAt` 里 POSITION_LIMIT 之后检查，市价与限价成交共用；`OrderBook.placeLimit` 挂单时查一次，成交时复检，失败走 `FILL_REJECTED` 撤单。`TradeKind.ADL`、`TradeResult.Reason.OPEN_INTEREST_LIMIT` 追加在枚举末尾（按序号编码）。
