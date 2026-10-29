@@ -277,6 +277,9 @@ class LangFilesTest {
         // 模组配置界面（NeoForge ConfigurationScreen）按 <模组 id>.configuration.<配置项> 找标题与说明，按配置文件名找分区标题
         for (String key : List.of("creepercapital.configuration.title", "creepercapital.configuration.colorScheme",
                 "creepercapital.configuration.colorScheme.tooltip",
+                "creepercapital.configuration.layoutOrderPanelRatio", "creepercapital.configuration.layoutOrderPanelRatio.tooltip",
+                "creepercapital.configuration.layoutMarketColumnRatio", "creepercapital.configuration.layoutMarketColumnRatio.tooltip",
+                "creepercapital.configuration.layoutTableRatio", "creepercapital.configuration.layoutTableRatio.tooltip",
                 "creepercapital.configuration.section.creepercapital.client.toml",
                 "creepercapital.configuration.section.creepercapital.client.toml.title")) {
             problems.addAll(checkKey(key, "ClientConfig（模组配置界面）"));

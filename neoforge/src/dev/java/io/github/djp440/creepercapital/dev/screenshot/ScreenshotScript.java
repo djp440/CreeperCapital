@@ -20,7 +20,8 @@ import net.neoforged.neoforge.common.NeoForge;
 
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
- * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌。
+ * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -312,7 +313,24 @@ final class ScreenshotScript {
                             + "K 线阳线绿、阴线红，盘口卖盘红、买盘绿，下单面板「开多」绿、「开空」红，与 01~27 的配色一致；"
                             + "切换立即生效，不需要重开界面；无重叠、截断和乱码。",
                     View.TRADING,
-                    scheme(ColorScheme.GREEN_UP)));
+                    scheme(ColorScheme.GREEN_UP)),
+            new ScreenshotStep("42", "默认布局（#31，3 级验收）",
+                    "区域比例为缺省（客户端配置里三项比例都是 0）的标准布局，作为拖拽前的对照：标题栏、两行行情栏，下面左侧 K 线图卡片、图表右侧窄一点的盘口栏、底部表格区，"
+                            + "最右侧是从行情栏下一直通到底部的下单面板；卡片之间是同样宽的缝；标题栏右端是灰掉的「恢复默认布局」按钮（布局还是缺省，点不动）；"
+                            + "截图时鼠标停在窗口正中，正好悬停在 K 线图与盘口栏之间的缝上，所以这条缝高亮成灰色（悬停提示；真机上光标同时变成左右调整形）；"
+                            + "表格区回到资产页，无重叠、截断和乱码。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), layout(0, 0, 0))),
+            new ScreenshotStep("43", "拖拽边框后的布局（#31，3 级验收）",
+                    "等同于玩家把三条边框都拖过后的布局（下单面板宽度比例 0.34、盘口栏 0.26、表格区高度比例 0.50）：下单面板和盘口栏都比 42 更宽，"
+                            + "K 线图相应变窄，底部表格区明显变高、图表变矮，但图表仍不小于最小尺寸；卡片之间的缝仍然等宽，没有重叠、不越出窗口；"
+                            + "标题栏右端的「恢复默认布局」按钮亮起（白字，可点）；下单面板、盘口、表格内容跟着新尺寸重排，无截断和乱码。",
+                    View.TRADING,
+                    layout(0.34, 0.26, 0.5)),
+            new ScreenshotStep("44", "恢复默认布局（#31，3 级验收）",
+                    "相当于点了「恢复默认布局」：布局与 42 完全一致，「恢复默认布局」按钮重新灰掉；客户端配置里的三项比例回到 0（下一次启动不受截图影响）。",
+                    View.TRADING,
+                    layout(0, 0, 0)));
 
     private ScreenshotScript() {
     }
@@ -320,6 +338,11 @@ final class ScreenshotScript {
     /** 切换涨跌色方案（写进客户端配置，与交易界面上的切换按钮、模组配置界面改的是同一项）。 */
     private static Consumer<Minecraft> scheme(ColorScheme scheme) {
         return minecraft -> ClientConfig.setColorScheme(scheme);
+    }
+
+    /** 设置交易界面的区域比例（等同于玩家拖拽边框后松手，写进客户端配置）；全 0 即缺省布局。 */
+    private static Consumer<Minecraft> layout(double orderPanel, double column, double table) {
+        return minecraft -> ClientConfig.setLayoutRatios(orderPanel, column, table);
     }
 
     /** 下单面板回到市价、「预估」页（前面的步骤停在限价或止盈止损页）。 */
