@@ -4,6 +4,7 @@ import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.kline.Stats24h;
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.MarketTrade;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.Order;
@@ -66,6 +67,15 @@ final class ModCodecs {
             MONEY, PlayerTrade::realizedPnl,
             ByteBufCodecs.VAR_LONG, PlayerTrade::marketSeconds,
             PlayerTrade::new);
+
+    static final StreamCodec<ByteBuf, MarketTrade> MARKET_TRADE = StreamCodec.composite(
+            SYMBOL, MarketTrade::symbol,
+            ByteBufCodecs.VAR_LONG, MarketTrade::marketSeconds,
+            ByteBufCodecs.BOOL, MarketTrade::buy,
+            ByteBufCodecs.DOUBLE, MarketTrade::price,
+            ByteBufCodecs.VAR_LONG, MarketTrade::lots,
+            ByteBufCodecs.stringUtf8(64), MarketTrade::player,
+            MarketTrade::new);
 
     private static <E extends Enum<E>> StreamCodec<ByteBuf, E> enumCodec(Class<E> type) {
         E[] values = type.getEnumConstants();

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.ToDoubleFunction;
 
 import io.github.djp440.creepercapital.core.account.AccountBook;
@@ -44,6 +45,7 @@ public final class TradingBook {
     private final Map<UUID, Map<String, Position>> positions = new HashMap<>();
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
     private long lastTradeId;
+    private final List<Consumer<PlayerTrade>> tradeListeners = new ArrayList<>();
 
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
         this.accounts = accounts;
@@ -269,7 +271,13 @@ public final class TradingBook {
         if (history.size() > MAX_TRADES_PER_PLAYER) {
             history.remove(0);
         }
+        tradeListeners.forEach(listener -> listener.accept(numbered));
         return new TradeResult.Filled(numbered);
+    }
+
+    /** 订阅玩家成交：成交记录的源头每记下一笔就通知一次（全服「最新成交」广播挂在这里，开仓、平仓、以后的强平与限价成交都会经过）。 */
+    public void addTradeListener(Consumer<PlayerTrade> listener) {
+        tradeListeners.add(listener);
     }
 
     private static Position addTo(Position existing, long lots, double price, Money margin) {

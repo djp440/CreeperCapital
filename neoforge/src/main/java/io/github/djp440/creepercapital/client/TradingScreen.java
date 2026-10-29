@@ -112,6 +112,19 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，右侧栏切到「最新成交」页。 */
+    public static void openWithLatestTrades() {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.marketColumn.showLatestTrades();
+        }
+    }
+
+    @Override
+    public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+        return marketColumn.mouseScrolled(x, y, scrollY) || super.mouseScrolled(x, y, scrollX, scrollY);
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();

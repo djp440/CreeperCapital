@@ -10,6 +10,8 @@ import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.Minecraft;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.common.NeoForge;
 
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
@@ -141,7 +143,16 @@ final class ScreenshotScript {
                             + "GUNPOWDERCRP 开多限价 10 个，刚被撤单（状态「已撤销」灰字，成交价与手续费显示 \"--\"）；"
                             + "DIAMONDCRP 的开空挂单仍在「当前委托」页，不出现在这里；列不重叠、无乱码。",
                     View.ORDER_HISTORY,
-                    fillAndCancelOrders()));
+                    fillAndCancelOrders()),
+            new ScreenshotStep("19", "最新成交：GUNPOWDERCRP（含玩家成交，3 级验收）",
+                    "右侧栏顶部页签条是「盘口」「最新成交」，「最新成交」为黄字加下划线；表头「价格(CRP) 数量 时间」；"
+                            + "列表最新的在最上面，每行：价格（买入绿、卖出红，落在最新价格 ± 半个点差 0.025 之内）、数量（整数个，火药精度 0 位）、"
+                            + "市场时间（HH:mm:ss，每个行情步 6 秒，同一步内的几笔时间相同）；大量灰白数量的普通行是模拟成交，一个行情步拆成 2 到 8 笔；"
+                            + "其中有两笔玩家成交（刚下的：开多 30 个、平仓 10 个，自动截图的玩家）整行带黄色半透明底色和左侧黄色色条，"
+                            + "并多占一行用黄字标出「玩家 <玩家名>」，开多那笔价格为绿（买入）、平仓那笔价格为红（卖出）；"
+                            + "文字不重叠、不越出栏边框，列表放不下的旧成交被截掉，不盖住栏底边框。",
+                    View.LATEST_TRADES,
+                    placePlayerTrades()));
 
     private ScreenshotScript() {
     }
@@ -197,6 +208,32 @@ final class ScreenshotScript {
                     .findFirst().ifPresent(order -> ClientTrading.cancel(order.id()));
             ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> ClientTrading.sendLimit(
                     OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 5, snapshot.lastPrice() * 1.5));
+        };
+    }
+
+    /** 下单推迟到打开视图后第几个 tick：截图在第 40 个 tick，留 4 个 tick 让成交到达，同时避免模拟成交很快把玩家成交挤出可视范围。 */
+    private static final int PLAYER_TRADES_DELAY_TICKS = 36;
+    private static int playerTradesCountdown = -1;
+    private static boolean countdownListening;
+
+    /**
+     * 选中 GUNPOWDERCRP，视图打开之后再开多 30 个、平掉 10 个，让「最新成交」顶部有两笔刚到的高亮玩家成交。
+     * 模拟成交每个行情步（1 秒）来 2 到 8 笔，下单太早的话玩家成交会被挤到可视范围之外。
+     */
+    private static Consumer<Minecraft> placePlayerTrades() {
+        return minecraft -> {
+            ClientMarket.select("GUNPOWDERCRP");
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 20);
+            playerTradesCountdown = PLAYER_TRADES_DELAY_TICKS;
+            if (!countdownListening) {
+                countdownListening = true;
+                NeoForge.EVENT_BUS.addListener((ClientTickEvent.Post event) -> {
+                    if (playerTradesCountdown > 0 && --playerTradesCountdown == 0) {
+                        ClientTrading.send(OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 30);
+                        ClientTrading.send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", 10);
+                    }
+                });
+            }
         };
     }
 

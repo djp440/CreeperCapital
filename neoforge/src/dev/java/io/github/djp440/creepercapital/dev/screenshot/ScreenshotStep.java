@@ -39,7 +39,9 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，表格区切到当前委托页。 */
         OPEN_ORDERS(minecraft -> TradingScreen.openForTrading("OPEN_ORDERS", "")),
         /** 交易界面，表格区切到历史委托页。 */
-        ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", ""));
+        ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", "")),
+        /** 交易界面，右侧栏切到「最新成交」页。 */
+        LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades());
 
         private final Consumer<Minecraft> opener;
 

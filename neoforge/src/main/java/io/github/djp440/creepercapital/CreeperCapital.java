@@ -5,6 +5,7 @@ import io.github.djp440.creepercapital.gametest.MarketGameTests;
 import io.github.djp440.creepercapital.network.ModPayloads;
 import io.github.djp440.creepercapital.server.CreeperCommand;
 import io.github.djp440.creepercapital.server.ServerAccounts;
+import io.github.djp440.creepercapital.server.ServerLatestTrades;
 import io.github.djp440.creepercapital.server.ServerMarket;
 import io.github.djp440.creepercapital.server.ServerTrading;
 import net.minecraft.resources.Identifier;
@@ -24,6 +25,7 @@ public final class CreeperCapital {
         ServerMarket.register();
         ServerAccounts.register();
         ServerTrading.register();
+        ServerLatestTrades.register();
         CreeperCommand.register();
         MarketGameTests.register(modBus);
     }
