@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -25,11 +26,16 @@ import io.github.djp440.creepercapital.core.market.ContractState;
 import io.github.djp440.creepercapital.core.market.Market;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.PricingState;
+import io.github.djp440.creepercapital.core.account.Assets;
+import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.KlineRequestPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
+import io.github.djp440.creepercapital.server.AccountSavedData;
 import io.github.djp440.creepercapital.server.ContractConfig;
 import io.github.djp440.creepercapital.server.MarketSavedData;
+import io.github.djp440.creepercapital.server.ServerAccounts;
 import io.github.djp440.creepercapital.server.ServerMarket;
 import io.netty.buffer.Unpooled;
 import net.minecraft.commands.CommandSourceStack;
@@ -50,6 +56,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionSet;
+import net.minecraft.server.players.NameAndId;
 import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.world.level.storage.SavedDataStorage;
 import net.neoforged.bus.api.IEventBus;
@@ -110,6 +117,17 @@ public final class MarketGameTests {
         function("invalid_contract_config_falls_back_without_overwriting", helper -> {
             try {
                 invalidContractConfigFallsBackWithoutOverwriting(helper);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+        function("account_payload_round_trips", MarketGameTests::accountPayloadRoundTrips);
+        function("dev_deposit_and_withdraw_are_op_only_and_work_offline", MarketGameTests::devDepositAndWithdrawAreOpOnlyAndWorkOffline);
+        function("dev_deposit_and_withdraw_reject_bad_amounts", MarketGameTests::devDepositAndWithdrawRejectBadAmounts);
+        function("online_player_assets_refresh_immediately", MarketGameTests::onlinePlayerAssetsRefreshImmediately);
+        function("accounts_survive_save_and_reload", helper -> {
+            try {
+                accountsSurviveSaveAndReload(helper);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -412,6 +430,120 @@ public final class MarketGameTests {
             throw new IllegalStateException(e);
         }
         helper.assertValueEqual(pendingJump(symbol), afterOp, "被拒绝的命令不改变市场");
+        helper.succeed();
+    }
+
+    /** 资产载荷的编解码不丢任何一项，金额按最小单位精确往返。 */
+    private static void accountPayloadRoundTrips(GameTestHelper helper) {
+        Assets assets = new Assets(Money.parse("1234.567891"), Money.parse("-0.000001"), Money.parse("1234.567890"),
+                Money.parse("1000"));
+        RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
+        AccountPayload.STREAM_CODEC.encode(buffer, new AccountPayload(assets));
+        helper.assertValueEqual(AccountPayload.STREAM_CODEC.decode(buffer).assets(), assets, "解码后的资产");
+        helper.succeed();
+    }
+
+    /** 命令里的玩家名解析成 UUID：先把名字登记进服务端的名字缓存，模拟「曾经进过服、现在离线」的玩家。 */
+    private static NameAndId offlinePlayer(MinecraftServer server, String name) {
+        NameAndId player = new NameAndId(UUID.randomUUID(), name);
+        server.services().nameToIdCache().add(player);
+        return player;
+    }
+
+    /** 只有 OP 能用 deposit/withdraw；对离线玩家同样有效；扣除不会超过余额；小数位精确。 */
+    private static void devDepositAndWithdrawAreOpOnlyAndWorkOffline(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        CommandSourceStack op = server.createCommandSourceStack();
+        CommandSourceStack regularPlayer = op.withPermission(PermissionSet.NO_PERMISSIONS);
+        NameAndId offline = offlinePlayer(server, "OfflineTrader1");
+        helper.assertTrue(server.getPlayerList().getPlayer(offline.id()) == null, "测试玩家应当离线");
+
+        helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev deposit OfflineTrader1 100"), "普通玩家无权使用 deposit");
+        helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev withdraw OfflineTrader1 1"), "普通玩家无权使用 withdraw");
+        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "普通玩家不应能充值");
+
+        server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 100.1");
+        server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 0.2");
+        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.3"), "OP 对离线玩家充值（小数无误差）");
+
+        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 0.000001");
+        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "扣除最小单位");
+
+        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.3");
+        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "余额不足时扣除被拒绝，余额不变");
+        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.299999");
+        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "恰好扣光");
+        helper.succeed();
+    }
+
+    /** 非法数量（零、负数、第 7 位小数、科学计数法、非数字）被拒绝，余额不变。 */
+    private static void devDepositAndWithdrawRejectBadAmounts(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        CommandSourceStack op = server.createCommandSourceStack();
+        NameAndId offline = offlinePlayer(server, "OfflineTrader2");
+        try {
+            for (String bad : List.of("0", "-5", "0.0000001", "1e3", "abc")) {
+                helper.assertValueEqual(
+                        server.getCommands().getDispatcher().execute("creeper dev deposit OfflineTrader2 " + bad, op), 0,
+                        "非法数量 " + bad + " 应被拒绝");
+            }
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "被拒绝的充值不改变余额");
+            helper.assertTrue(failsToParse(server, op, "creeper dev deposit OfflineTrader2"), "缺数量应被拒绝");
+        } catch (CommandSyntaxException e) {
+            throw new IllegalStateException(e);
+        }
+        helper.succeed();
+    }
+
+    /** 在线玩家调账后立刻收到最新资产（钱包、未实现盈亏 0、保证金余额与可用余额等于钱包）。 */
+    private static void onlinePlayerAssetsRefreshImmediately(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        CommandSourceStack op = server.createCommandSourceStack();
+        ServerPlayer player = MockClient.join(helper, "AssetsViewer");
+        try {
+            int before = MockClient.received(player, AccountPayload.class).size();
+            helper.assertTrue(before >= 1, "登录时应收到一次资产");
+            server.getCommands().performPrefixedCommand(op, "creeper dev deposit AssetsViewer 250.5");
+            List<AccountPayload> received = MockClient.received(player, AccountPayload.class);
+            helper.assertValueEqual(received.size(), before + 1, "充值后应立即收到一次资产");
+            helper.assertValueEqual(received.get(received.size() - 1).assets(), Assets.ofWallet(Money.parse("250.5")), "充值后的资产");
+            server.getCommands().performPrefixedCommand(op, "creeper dev withdraw AssetsViewer 0.5");
+            received = MockClient.received(player, AccountPayload.class);
+            helper.assertValueEqual(received.get(received.size() - 1).assets(), Assets.ofWallet(Money.parse("250")), "扣除后的资产");
+        } finally {
+            Money left = ServerAccounts.balance(player.getUUID());
+            if (left.isPositive()) {
+                ServerAccounts.withdraw(server, player.getUUID(), left);
+            }
+            MockClient.leave(player);
+        }
+        helper.succeed();
+    }
+
+    /** 账户写进存档文件、用全新存储重新读出后，余额与存档前完全一致（含最小单位）。 */
+    private static void accountsSurviveSaveAndReload(GameTestHelper helper) throws IOException {
+        ServerLevel level = helper.getLevel();
+        UUID alice = UUID.randomUUID();
+        UUID bob = UUID.randomUUID();
+        Path dataFolder = Files.createTempDirectory("creepercapital-accounts");
+        try {
+            SavedDataStorage writer = new SavedDataStorage(level, dataFolder, DataFixers.getDataFixer(), level.registryAccess());
+            AccountSavedData data = writer.computeIfAbsent(AccountSavedData.TYPE);
+            data.book().deposit(alice, Money.parse("12345.678901"));
+            data.book().deposit(bob, Money.parse("0.000001"));
+            data.setDirty();
+            writer.saveAndJoin();
+            writer.close();
+
+            SavedDataStorage reader = new SavedDataStorage(level, dataFolder, DataFixers.getDataFixer(), level.registryAccess());
+            AccountSavedData reloaded = reader.get(AccountSavedData.TYPE);
+            helper.assertTrue(reloaded != null, "存档里应当读得出账户");
+            helper.assertValueEqual(reloaded.book().balance(alice), Money.parse("12345.678901"), "重新加载后的余额");
+            helper.assertValueEqual(reloaded.book().balance(bob), Money.parse("0.000001"), "重新加载后的最小单位余额");
+            reader.close();
+        } finally {
+            deleteRecursively(dataFolder);
+        }
         helper.succeed();
     }
 

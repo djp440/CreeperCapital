@@ -5,6 +5,7 @@ import org.lwjgl.glfw.GLFW;
 import com.mojang.blaze3d.platform.InputConstants;
 
 import io.github.djp440.creepercapital.CreeperCapital;
+import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
@@ -46,6 +47,7 @@ public final class CreeperCapitalClient {
     private static void onRegisterPayloadHandlers(RegisterClientPayloadHandlersEvent event) {
         event.register(MarketSnapshotPayload.TYPE, (payload, context) -> ClientMarket.accept(payload));
         event.register(KlineHistoryPayload.TYPE, (payload, context) -> ClientKlines.accept(payload));
+        event.register(AccountPayload.TYPE, (payload, context) -> ClientAccount.accept(payload));
         event.register(OpenTradingScreenPayload.TYPE, (payload, context) -> TradingScreen.open());
     }
 
@@ -57,5 +59,6 @@ public final class CreeperCapitalClient {
 
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientMarket.clear();
+        ClientAccount.clear();
     }
 }

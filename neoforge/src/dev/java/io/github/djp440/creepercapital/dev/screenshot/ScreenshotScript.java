@@ -70,13 +70,25 @@ final class ScreenshotScript {
                             + "30 天里价格有明显的起伏，单日涨跌幅明显比 DIAMONDCRP 大（波动率倾向更高），"
                             + "偶有大阳线或大阴线（跳跃）；无错位和乱码。",
                     View.TRADING,
-                    select(CandlePeriod.D1)));
+                    select(CandlePeriod.D1)),
+            new ScreenshotStep("10", "资产页（dev 充值后，3 级验收）",
+                    "界面最底部是表格区：左上一个黄字加下划线的「资产」页签，下方一行四项数据（名称在上、数值在下）："
+                            + "钱包余额 12,345.678901 CRP、未实现盈亏 0.00 CRP、保证金余额 12,345.678901 CRP、可用余额 12,345.678901 CRP"
+                            + "（还没有仓位，所以后三项中除未实现盈亏外都等于钱包余额）；刚执行过 /creeper dev deposit @p 12345.678901，"
+                            + "余额已立即刷新而不是显示 0.00；K 线图被压缩到表格区之上，图表底部不与表格区重叠；无错位和乱码。",
+                    View.TRADING,
+                    deposit("12345.678901")));
 
     private ScreenshotScript() {
     }
 
     private static Consumer<Minecraft> select(CandlePeriod period) {
         return minecraft -> ClientKlines.select(period);
+    }
+
+    /** 以玩家自己的身份执行 dev 充值命令（截图世界里玩家是 OP），验证调账后资产页立即刷新。 */
+    private static Consumer<Minecraft> deposit(String amount) {
+        return minecraft -> minecraft.player.connection.sendCommand("creeper dev deposit @p " + amount);
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {

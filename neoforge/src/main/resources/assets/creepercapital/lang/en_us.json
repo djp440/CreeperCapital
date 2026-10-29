@@ -22,5 +22,15 @@
   "commands.creepercapital.market.resumed": "Market resumed",
   "commands.creepercapital.market.advanced": "Market advanced %s steps",
   "commands.creepercapital.market.jump": "%s will jump %s%% on the next market step",
-  "commands.creepercapital.market.jump.unknown": "No such contract: %s"
+  "commands.creepercapital.market.jump.unknown": "No such contract: %s",
+  "screen.creepercapital.trading.table.assets": "Assets",
+  "screen.creepercapital.trading.assets.wallet": "Wallet Balance",
+  "screen.creepercapital.trading.assets.unrealized_pnl": "Unrealized PnL",
+  "screen.creepercapital.trading.assets.margin_balance": "Margin Balance",
+  "screen.creepercapital.trading.assets.available_balance": "Available Balance",
+  "commands.creepercapital.account.deposited": "Deposited to %s: %s CRP, balance %s CRP",
+  "commands.creepercapital.account.withdrawn": "Withdrew from %s: %s CRP, balance %s CRP",
+  "commands.creepercapital.account.invalid_amount": "Invalid amount (positive, up to 6 decimals): %s",
+  "commands.creepercapital.account.insufficient": "%s has insufficient balance: %s CRP, need %s CRP",
+  "commands.creepercapital.account.overflow": "%s would exceed the balance limit"
 }

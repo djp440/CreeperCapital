@@ -4,6 +4,7 @@ import io.github.djp440.creepercapital.dev.DevLogFile;
 import io.github.djp440.creepercapital.gametest.MarketGameTests;
 import io.github.djp440.creepercapital.network.ModPayloads;
 import io.github.djp440.creepercapital.server.CreeperCommand;
+import io.github.djp440.creepercapital.server.ServerAccounts;
 import io.github.djp440.creepercapital.server.ServerMarket;
 import net.minecraft.resources.Identifier;
 import net.neoforged.bus.api.IEventBus;
@@ -20,6 +21,7 @@ public final class CreeperCapital {
         DevLogFile.installIfConfigured();
         ModPayloads.register(modBus);
         ServerMarket.register();
+        ServerAccounts.register();
         CreeperCommand.register();
         MarketGameTests.register(modBus);
     }
