@@ -10,12 +10,14 @@ import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderExtras;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
+import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.codec.ByteBufCodecs;
@@ -101,8 +103,16 @@ final class ModCodecs {
     private static final StreamCodec<ByteBuf, OrderType> ORDER_TYPE = enumCodec(OrderType.class);
     private static final StreamCodec<ByteBuf, OrderStatus> ORDER_STATUS = enumCodec(OrderStatus.class);
     private static final StreamCodec<ByteBuf, CancelReason> CANCEL_REASON = enumCodec(CancelReason.class);
+    private static final StreamCodec<ByteBuf, TriggerSource> TRIGGER_SOURCE = enumCodec(TriggerSource.class);
 
-    /** 委托有 15 个字段，超过 {@code StreamCodec.composite} 的上限，所以逐字段读写。 */
+    static final StreamCodec<ByteBuf, OrderExtras> ORDER_EXTRAS = StreamCodec.composite(
+            ByteBufCodecs.BOOL, OrderExtras::reduceOnly,
+            TRIGGER_SOURCE, OrderExtras::triggerSource,
+            ByteBufCodecs.DOUBLE, OrderExtras::attachedTakeProfit,
+            ByteBufCodecs.DOUBLE, OrderExtras::attachedStopLoss,
+            OrderExtras::new);
+
+    /** 委托有 16 个字段，超过 {@code StreamCodec.composite} 的上限，所以逐字段读写。 */
     static final StreamCodec<ByteBuf, Order> ORDER = StreamCodec.of(
             (buf, order) -> {
                 ByteBufCodecs.VAR_LONG.encode(buf, order.id());
@@ -120,12 +130,14 @@ final class ModCodecs {
                 ByteBufCodecs.VAR_LONG.encode(buf, order.createdSeconds());
                 ByteBufCodecs.VAR_LONG.encode(buf, order.closedSeconds());
                 CANCEL_REASON.encode(buf, order.cancelReason());
+                ORDER_EXTRAS.encode(buf, order.extras());
             },
             buf -> new Order(ByteBufCodecs.VAR_LONG.decode(buf), UUIDUtil.STREAM_CODEC.decode(buf), SYMBOL.decode(buf),
                     SIDE.decode(buf), ORDER_TYPE.decode(buf), ByteBufCodecs.DOUBLE.decode(buf),
                     ByteBufCodecs.VAR_LONG.decode(buf), ByteBufCodecs.VAR_INT.decode(buf), MONEY.decode(buf),
                     ORDER_STATUS.decode(buf), ByteBufCodecs.DOUBLE.decode(buf), MONEY.decode(buf),
-                    ByteBufCodecs.VAR_LONG.decode(buf), ByteBufCodecs.VAR_LONG.decode(buf), CANCEL_REASON.decode(buf)));
+                    ByteBufCodecs.VAR_LONG.decode(buf), ByteBufCodecs.VAR_LONG.decode(buf), CANCEL_REASON.decode(buf),
+                    ORDER_EXTRAS.decode(buf)));
 
     static final StreamCodec<ByteBuf, TradingParams> TRADING_PARAMS = StreamCodec.composite(
             SYMBOL, TradingParams::symbol,

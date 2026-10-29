@@ -8,6 +8,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -20,11 +22,13 @@ import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderEvent;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
+import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
@@ -130,11 +134,9 @@ public final class ServerTrading {
         if (order.action().isMarginSetting()) {
             return executeMargin(player, spec, order);
         }
-        if (order.execution() == OrderPayload.Execution.LIMIT && order.action() == OrderPayload.Action.CLOSE) {
-            // 限价平仓（止盈）属于 #15，现在只支持限价开仓
-            return rejected("limit_close_unsupported");
-        }
         TradeResult result = submit(id, spec, order);
+        // 玩家平仓可能让附带的止盈止损失效，记录下来（离线汇总在 #19 接）
+        logEvents(book().orders().takeEvents());
         if (result instanceof TradeResult.Rejected rejected) {
             LOGGER.debug("拒绝 {} 的委托 {}：{} {}", player.getGameProfile().name(), order, rejected.reason(), rejected.args());
             return rejected(rejected.reason().name().toLowerCase(Locale.ROOT), rejected.args().toArray(String[]::new));
@@ -146,6 +148,15 @@ public final class ServerTrading {
                     resting.price(), resting.frozen());
             return new OrderResultPayload(true, "limit_placed", List.of(resting.symbol(),
                     formatQuantity(resting.lots(), spec.quantityDecimals()), formatPrice(resting.price())));
+        }
+        if (result instanceof TradeResult.ProtectionPlaced protection) {
+            List<Order> created = protection.orders();
+            created.forEach(o -> LOGGER.info("{} #{} {} {} 触发价 {}（{}）数量 {}", o.type(), o.id(),
+                    player.getGameProfile().name(), o.symbol(), o.price(), o.triggerSource(),
+                    formatQuantity(o.lots(), spec.quantityDecimals())));
+            return new OrderResultPayload(true, "protection_placed", List.of(order.symbol(),
+                    order.takeProfit() != 0 ? formatPrice(order.takeProfit()) : "--",
+                    order.stopLoss() != 0 ? formatPrice(order.stopLoss()) : "--"));
         }
         PlayerTrade trade = ((TradeResult.Filled) result).trade();
         LOGGER.info("玩家成交 #{} {} {} {} {} 数量 {} 价格 {} 手续费 {} 已实现盈亏 {}", trade.id(), player.getGameProfile().name(),
@@ -179,15 +190,37 @@ public final class ServerTrading {
     private static TradeResult submit(UUID id, ContractSpec spec, OrderPayload order) {
         MarketSnapshot snapshot = ServerMarket.snapshot(order.symbol());
         Side side = order.action() == OrderPayload.Action.OPEN_SHORT ? Side.SHORT : Side.LONG;
-        if (order.execution() == OrderPayload.Execution.LIMIT) {
-            return book().orders().placeLimit(id, spec, snapshot, side, order.lots(), order.leverage(), order.price());
+        OrderPayload.Action action = order.action();
+        boolean limit = order.execution() == OrderPayload.Execution.LIMIT;
+        if (order.reduceOnly() && (action == OrderPayload.Action.OPEN_LONG || action == OrderPayload.Action.OPEN_SHORT)) {
+            // 开多 / 开空是买入 / 卖出：带只减仓就是缩减反向的仓位，没有可缩减的仓位就拒绝（币安同样拒绝），绝不开仓
+            Position position = book().position(id, spec.symbol()).orElse(null);
+            if (position == null || position.side() == side) {
+                return TradeResult.reject(TradeResult.Reason.NO_POSITION);
+            }
+            action = OrderPayload.Action.CLOSE;
         }
-        return switch (order.action()) {
-            case OPEN_LONG, OPEN_SHORT ->
-                    book().open(id, spec, snapshot, side, order.lots(), order.leverage(), ServerTrading::markPrice);
-            case CLOSE -> book().close(id, spec, snapshot, order.lots());
+        return switch (action) {
+            case OPEN_LONG, OPEN_SHORT -> limit
+                    ? book().orders().placeLimit(id, spec, snapshot, side, order.lots(), order.leverage(), order.price(),
+                            order.protection(), ServerTrading::markPrice)
+                    : book().orders().openWithProtection(id, spec, snapshot, side, order.lots(), order.leverage(),
+                            order.protection(), ServerTrading::markPrice);
+            case CLOSE -> limit
+                    ? book().orders().placeReduceOnlyLimit(id, spec, snapshot, order.lots(), order.price())
+                    : order.reduceOnly() ? book().closeUpTo(id, spec, snapshot, order.lots())
+                            : book().close(id, spec, snapshot, order.lots());
+            case PROTECT -> book().orders().placeProtection(id, spec, snapshot, order.lots(), order.protection());
             default -> throw new IllegalStateException("不是成交动作：" + order.action());
         };
+    }
+
+    private static void logEvents(List<OrderEvent> events) {
+        for (OrderEvent event : events) {
+            LOGGER.info("委托 #{} {}：{} {} {} {} 数量 {} 价格 {} 金额 {} 盈亏 {} 原因 {}", event.orderId(), event.kind(),
+                    event.player(), event.type(), event.side(), event.symbol(), event.lots(), event.price(), event.amount(),
+                    event.realizedPnl(), event.cancelReason());
+        }
     }
 
     private static OrderResultPayload filled(PlayerTrade trade, ContractSpec spec) {
@@ -212,7 +245,10 @@ public final class ServerTrading {
             return;
         }
         LOGGER.info("玩家撤单 #{} {} 释放 {}", event.get().orderId(), player.getGameProfile().name(), event.get().amount());
-        ModPayloads.sendTo(player, describe(event.get()));
+        OrderResultPayload notice = describe(event.get());
+        if (notice != null) {
+            ModPayloads.sendTo(player, notice);
+        }
         markDirty();
         sendState(player);
         ModPayloads.sendTo(player, new AccountPayload(assets(id)));
@@ -226,17 +262,32 @@ public final class ServerTrading {
         return ServerMarket.snapshots().stream().mapToLong(s -> s.time().totalSeconds()).findFirst().orElse(0);
     }
 
-    /** 委托成交 / 撤销事件对应的玩家提示。 */
-    private static OrderResultPayload describe(OrderEvent event) {
+    /**
+     * 委托事件对应的玩家提示；触发（紧接着就是成交）和仓位平掉后的自动失效不单独提示，免得盖掉成交那一条，
+     * 它们在历史委托里看得到。
+     */
+    private static @Nullable OrderResultPayload describe(OrderEvent event) {
+        if (event.kind() == OrderEvent.Kind.TRIGGERED || event.cancelReason() == CancelReason.POSITION_CLOSED) {
+            return null;
+        }
         int decimals = ServerMarket.symbols().contains(event.symbol())
                 ? ServerMarket.spec(event.symbol()).quantityDecimals() : 0;
         List<String> args = List.of(event.symbol(), formatQuantity(event.lots(), decimals), formatPrice(event.price()),
-                event.amount().toDisplayString());
+                event.amount().toDisplayString(), event.realizedPnl().toDisplayString());
         if (event.kind() == OrderEvent.Kind.FILLED) {
-            return new OrderResultPayload(true, "limit_filled", args);
+            String code = switch (event.type()) {
+                case TAKE_PROFIT -> "take_profit_filled";
+                case STOP_LOSS -> "stop_loss_filled";
+                case LIMIT -> "limit_filled";
+            };
+            return new OrderResultPayload(true, code, args);
         }
-        return new OrderResultPayload(event.cancelReason() == CancelReason.USER,
-                event.cancelReason() == CancelReason.USER ? "order_cancelled" : "order_cancelled_rejected", args);
+        String code = switch (event.cancelReason()) {
+            case USER -> "order_cancelled";
+            case LIQUIDATED -> "order_cancelled_liquidated";
+            default -> "order_cancelled_rejected";
+        };
+        return new OrderResultPayload(event.cancelReason() == CancelReason.USER, code, args);
     }
 
     private static OrderResultPayload rejected(String code, String... args) {
@@ -264,18 +315,19 @@ public final class ServerTrading {
         }
         Set<UUID> touched = new LinkedHashSet<>();
         for (OrderEvent event : events) {
-            LOGGER.info("委托 #{} {}：{} {} {} 数量 {} 价格 {} 金额 {} 原因 {}", event.orderId(), event.kind(),
-                    event.player(), event.side(), event.symbol(), event.lots(), event.price(), event.amount(),
-                    event.cancelReason());
             touched.add(event.player());
             ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
-            if (owner != null) {
-                ModPayloads.sendTo(owner, describe(event));
+            OrderResultPayload notice = describe(event);
+            if (owner != null && notice != null) {
+                ModPayloads.sendTo(owner, notice);
             }
         }
+        logEvents(events);
         if (!events.isEmpty()) {
             markDirty();
         }
+        // 同一行情步内的顺序约定：① 委托触发（上面）→ ② 资金费结算（#13，接在这里）→ ③ 强平检查
+        liquidationStage(server, snapshots, touched);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (touched.contains(player.getUUID())) {
                 sendState(player);
@@ -283,6 +335,48 @@ public final class ServerTrading {
             if (touched.contains(player.getUUID()) || !book.positions(player.getUUID()).isEmpty()) {
                 ModPayloads.sendTo(player, new AccountPayload(assets(player.getUUID())));
             }
+        }
+    }
+
+    /** 行情步的第 ③ 阶段：用这一步的标记价格检查全部仓位（离线玩家同样检查），强平的玩家记入 {@code touched}。 */
+    private static void liquidationStage(MinecraftServer server, List<MarketSnapshot> snapshots, Set<UUID> touched) {
+        if (snapshots.isEmpty()) {
+            return;
+        }
+        liquidate(server, snapshots.get(0).time().totalSeconds(), ServerTrading::markPrice, player -> true, touched);
+    }
+
+    /**
+     * 强平检查并通知。{@code players} 限定检查哪些玩家的仓位：生产代码检查所有人；GameTest 共用一个活账本，
+     * 用它把人为注入的极端价格限制在测试自己的玩家身上。
+     */
+    public static void liquidate(MinecraftServer server, long marketSeconds, ToDoubleFunction<String> markPrice,
+            Predicate<UUID> players, Set<UUID> touched) {
+        List<LiquidationEvent> events = book().checkLiquidations(players, markPrice,
+                symbol -> ServerMarket.spec(symbol).marginTiers(), marketSeconds);
+        for (LiquidationEvent event : events) {
+            LOGGER.info("强平 {} {} {}：{} 抵押损失 {} 进基金 {} 穿仓 {}（基金垫付 {}，池子承担 {}），同时撤销挂单 {} 张", event.player(),
+                    event.mode(), event.symbols(), event.positions().stream()
+                            .map(p -> p.side() + " " + p.lots() + " @ " + p.price() + " 盈亏 " + p.realizedPnl() + " 清算费 " + p.fee())
+                            .toList(),
+                    event.collateralLost(), event.toFund(), event.shortfall(), event.fundCovered(), event.poolBorne(),
+                    event.cancelledOrders().size());
+            touched.add(event.player());
+            ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
+            if (owner == null) {
+                continue;
+            }
+            ModPayloads.sendTo(owner, new OrderResultPayload(false, "liquidated",
+                    List.of(String.join(", ", event.symbols()), event.collateralLost().toDisplayString())));
+            for (OrderEvent cancelled : event.cancelledOrders()) {
+                OrderResultPayload notice = describe(cancelled);
+                if (notice != null) {
+                    ModPayloads.sendTo(owner, notice);
+                }
+            }
+        }
+        if (!events.isEmpty()) {
+            markDirty();
         }
     }
 

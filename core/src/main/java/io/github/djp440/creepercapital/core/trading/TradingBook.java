@@ -390,11 +390,32 @@ public final class TradingBook {
         if (!(price > 0)) {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
+        return closeAt(player, position, spec, snapshot.time().totalSeconds(), lots, price, TAKER_FEE);
+    }
+
+    /**
+     * 市价只减仓平仓：数量超过仓位时缩减到仓位，没有仓位拒绝（{@link TradeResult.Reason#NO_POSITION}）。
+     * 和 {@link #close} 的差别只在于数量超过仓位不报错。
+     */
+    public TradeResult closeUpTo(UUID player, ContractSpec spec, MarketSnapshot snapshot, long lots) {
+        Position position = position(player, spec.symbol()).orElse(null);
+        if (position == null) {
+            return TradeResult.reject(TradeResult.Reason.NO_POSITION);
+        }
+        return close(player, spec, snapshot, Math.min(lots, position.lots()));
+    }
+
+    /**
+     * 以给定成交价和手续费率结算一次平仓（调用方已校验数量与价格）：市价是 taker 费率，限价平仓被动成交是 maker 费率。
+     * 仓位被平光时，只减仓 / 止盈止损委托随之失效。
+     */
+    TradeResult closeAt(UUID player, Position position, ContractSpec spec, long marketSeconds, long lots, double price,
+            BigDecimal feeRate) {
         Money releasedMargin = lots == position.lots() ? position.margin()
                 : Money.ofUnits(BigDecimal.valueOf(position.margin().units()).multiply(BigDecimal.valueOf(lots))
                         .divide(BigDecimal.valueOf(position.lots()), 0, RoundingMode.FLOOR).longValueExact());
         Money pnl = Position.pnl(position.side(), position.entryPrice(), price, lots, spec.quantityDecimals());
-        Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()));
+        Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()), feeRate);
         // 逐仓：亏损最多亏到这部分仓位的保证金；全仓：亏损最多亏到保证金加账户里的空闲余额（没有强平前余额不会为负）。
         // 盈利由池子付，池子不够就付出它的全部余额
         boolean cross = position.mode() == MarginMode.CROSS;
@@ -422,13 +443,14 @@ public final class TradingBook {
         Map<String, Position> own = positions.get(player);
         if (lots == position.lots()) {
             own.remove(spec.symbol());
+            orders.onPositionClosed(player, spec.symbol(), marketSeconds);
         } else {
             own.put(spec.symbol(), new Position(position.symbol(), position.side(), position.lots() - lots,
                     position.entryPrice(), position.leverage(), position.margin().minus(releasedMargin),
                     position.quantityDecimals(), position.mode()));
         }
         return record(new PlayerTrade(0, player, spec.symbol(), position.side(), TradeKind.CLOSE, price, lots, fee,
-                realized, snapshot.time().totalSeconds()));
+                realized, marketSeconds));
     }
 
     // ---- 强平（#12） ----
@@ -456,8 +478,15 @@ public final class TradingBook {
      */
     public List<LiquidationEvent> checkLiquidations(ToDoubleFunction<String> markPrice,
             Function<String, MarginTiers> tiers, long marketSeconds) {
+        return checkLiquidations(player -> true, markPrice, tiers, marketSeconds);
+    }
+
+    /** 同上，但只检查 {@code players} 允许的玩家（GameTest 共用一个活账本，借此把注入的极端价格限定在测试自己的玩家上）。 */
+    public List<LiquidationEvent> checkLiquidations(Predicate<UUID> players0, ToDoubleFunction<String> markPrice,
+            Function<String, MarginTiers> tiers, long marketSeconds) {
         List<LiquidationEvent> events = new ArrayList<>();
         List<UUID> players = new ArrayList<>(positions.keySet());
+        players.removeIf(player -> !players0.test(player));
         players.sort(Comparator.naturalOrder());
         for (UUID player : players) {
             List<Position> priced = positions(player).stream().filter(p -> hasMark(markPrice, p.symbol()))
@@ -521,6 +550,8 @@ public final class TradingBook {
             Money fee = target.compareTo(feeRoom) > 0 ? feeRoom : target;
             feeRoom = feeRoom.minus(fee);
             positions.get(player).remove(position.symbol());
+            // 附带的止盈止损 / 只减仓委托跟着仓位失效
+            orders.onPositionClosed(player, position.symbol(), marketSeconds);
             PlayerTrade trade = ((TradeResult.Filled) record(new PlayerTrade(0, player, position.symbol(),
                     position.side(), TradeKind.LIQUIDATION, mark, position.lots(), fee, position.pnlAt(mark),
                     marketSeconds))).trade();
