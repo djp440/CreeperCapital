@@ -76,6 +76,11 @@ public final class ServerMarket {
         return market().symbols();
     }
 
+    /** 某个合约的定义，只能在服务器运行时调用。 */
+    public static ContractSpec spec(String symbol) {
+        return market().spec(symbol);
+    }
+
     /** 某个合约当前的市场快照，只能在服务器运行时调用。 */
     public static MarketSnapshot snapshot(String symbol) {
         return market().snapshot(symbol);
@@ -281,6 +286,7 @@ public final class ServerMarket {
                 ModPayloads.sendTo(player, payload);
             }
         }
+        ServerTrading.onMarketStep(server);
     }
 
     private static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {

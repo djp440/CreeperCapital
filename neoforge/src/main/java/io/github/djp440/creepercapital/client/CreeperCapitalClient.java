@@ -9,6 +9,8 @@ import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
+import io.github.djp440.creepercapital.network.OrderResultPayload;
+import io.github.djp440.creepercapital.network.TradingStatePayload;
 import net.minecraft.client.KeyMapping;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
@@ -48,6 +50,8 @@ public final class CreeperCapitalClient {
         event.register(MarketSnapshotPayload.TYPE, (payload, context) -> ClientMarket.accept(payload));
         event.register(KlineHistoryPayload.TYPE, (payload, context) -> ClientKlines.accept(payload));
         event.register(AccountPayload.TYPE, (payload, context) -> ClientAccount.accept(payload));
+        event.register(TradingStatePayload.TYPE, (payload, context) -> ClientTrading.accept(payload));
+        event.register(OrderResultPayload.TYPE, (payload, context) -> ClientTrading.accept(payload));
         event.register(OpenTradingScreenPayload.TYPE, (payload, context) -> TradingScreen.open());
     }
 
@@ -60,5 +64,6 @@ public final class CreeperCapitalClient {
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientMarket.clear();
         ClientAccount.clear();
+        ClientTrading.clear();
     }
 }

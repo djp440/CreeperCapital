@@ -84,4 +84,55 @@ class ContractSpecTest {
                 () -> spec("DIAMONDCRP", 10, 1, impossible));
         assertTrue(error.getMessage().contains("DIAMONDCRP"), "报错要指明是哪个合约：" + error.getMessage());
     }
+
+    @Test
+    @DisplayName("内置合约带点差、最高杠杆和数量精度：钻石 125x、0.001 个，火药 50x、1 个，点差默认是起始价格的 0.05%")
+    void defaultsCarryTradingParameters() {
+        ContractSpec diamond = ContractSpec.defaults().get(0);
+        ContractSpec gunpowder = ContractSpec.defaults().get(1);
+
+        assertEquals(0.5, diamond.spread(), 1e-12);
+        assertEquals(125, diamond.maxLeverage());
+        assertEquals(3, diamond.quantityDecimals());
+        assertEquals(0.05, gunpowder.spread(), 1e-12);
+        assertEquals(50, gunpowder.maxLeverage());
+        assertEquals(0, gunpowder.quantityDecimals());
+    }
+
+    @Test
+    @DisplayName("没写交易参数的合约用默认值：点差为起始价格的 0.05%，最高 20 倍杠杆，数量精度 3 位")
+    void tradingParametersHaveDefaults() {
+        ContractSpec spec = spec("BLAZERODCRP", 250, 1, PROFILE);
+
+        assertEquals(0.125, spec.spread(), 1e-12);
+        assertEquals(20, spec.maxLeverage());
+        assertEquals(3, spec.quantityDecimals());
+        assertEquals(0.125, ContractSpec.defaultSpread(250), 1e-12);
+    }
+
+    @Test
+    @DisplayName("点差不能为负或不是有限数，也不能达到起始价格；杠杆至少 1 倍；数量精度在 0 到 6 位之间")
+    void tradingParametersAreValidated() {
+        for (double bad : new double[] {-0.1, Double.NaN, Double.POSITIVE_INFINITY, 10, 11}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, bad, 20, 3), "点差 " + bad);
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0.1, 0, 3));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0.1, 20, -1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0.1, 20, 7));
+        assertEquals(0.0, new ContractSpec("DIAMONDCRP", "minecraft:diamond", 10, 1, PROFILE, 0, 20, 3).spread());
+    }
+
+    @Test
+    @DisplayName("数量以最小单位（手）为整数：钻石 1 手是 0.001 个，火药 1 手是 1 个")
+    void quantityIsCountedInLots() {
+        ContractSpec diamond = ContractSpec.defaults().get(0);
+        ContractSpec gunpowder = ContractSpec.defaults().get(1);
+
+        assertEquals(1.5, diamond.quantityOf(1500), 1e-12);
+        assertEquals(7.0, gunpowder.quantityOf(7), 1e-12);
+    }
 }

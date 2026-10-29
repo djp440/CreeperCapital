@@ -26,7 +26,13 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面。 */
         TRADING(minecraft -> TradingScreen.open()),
         /** 交易界面，且合约下拉列表已展开。 */
-        CONTRACT_MENU(minecraft -> TradingScreen.openWithContractMenu());
+        CONTRACT_MENU(minecraft -> TradingScreen.openWithContractMenu()),
+        /** 交易界面，表格区在资产页，下单面板的数量框里填了 2。 */
+        ORDER_PANEL(minecraft -> TradingScreen.openForTrading("ASSETS", "2")),
+        /** 交易界面，表格区切到仓位页。 */
+        POSITIONS(minecraft -> TradingScreen.openForTrading("POSITIONS", "")),
+        /** 交易界面，表格区切到成交历史页。 */
+        TRADES(minecraft -> TradingScreen.openForTrading("TRADES", ""));
 
         private final Consumer<Minecraft> opener;
 

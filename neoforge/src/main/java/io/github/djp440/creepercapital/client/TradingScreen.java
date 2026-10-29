@@ -18,7 +18,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图和底部表格区（目前只有「资产」页）。
+ * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图、右侧的下单面板（{@link OrderPanel}）和底部表格区（资产、仓位、成交历史三页）。
  * <p>
  * 行情栏左侧是当前合约的交易代码，市场里有多个合约时带下拉箭头，点开列表可以切换合约（各合约的行情、K 线互相独立）；
  * 其后依次是最新价格、标记价格、指数价格、资金费率与结算倒计时、市场时间，以及 24h 涨跌、最高、最低、成交量；
@@ -39,11 +39,35 @@ public final class TradingScreen extends Screen {
     private static final int CARET_GAP = 6;
     private static final int CARET_HALF_WIDTH = 3;
     private static final int HOVER = 0xFF1E2329;
-    /** 底部表格区：一排页签加一行数据。现在只有「资产」页，之后的持仓、委托等页签往这里加。 */
+    /** 底部表格区：一排页签（资产、仓位、成交历史）加该页的数据，之后的委托、资金费等页签往这里加。 */
     private static final int TABLE_TAB_HEIGHT = 16;
-    private static final int TABLE_HEIGHT = TABLE_TAB_HEIGHT + TICKER_ROW_HEIGHT + 4;
+    private static final int TABLE_HEIGHT = 96;
+    /** 下单面板与图表之间的间距。 */
+    private static final int PANEL_GAP = 8;
+
+    /** 底部表格区的页签。 */
+    private enum TableTab {
+        ASSETS("screen.creepercapital.trading.table.assets"),
+        POSITIONS("screen.creepercapital.trading.table.positions"),
+        TRADES("screen.creepercapital.trading.table.trades");
+
+        private final String key;
+
+        TableTab(String key) {
+            this.key = key;
+        }
+
+        Component label() {
+            return Component.translatable(key);
+        }
+    }
 
     private final KlineChart chart;
+    private final OrderPanel orderPanel;
+    private final TradeTables tables;
+    private TableTab tableTab = TableTab.ASSETS;
+    /** 底部表格区的上沿；每帧渲染时更新，点击判定要用。 */
+    private int tableTop;
     /** 周期切换栏的上沿；每帧渲染时更新，点击判定要用。 */
     private int tabsTop;
     /** 行情栏的上沿，合约下拉列表挂在它的第一行下面；每帧渲染时更新。 */
@@ -55,6 +79,17 @@ public final class TradingScreen extends Screen {
     private TradingScreen() {
         super(Component.translatable("screen.creepercapital.trading.title"));
         this.chart = new KlineChart(Minecraft.getInstance().font);
+        this.orderPanel = new OrderPanel(Minecraft.getInstance().font);
+        this.tables = new TradeTables(Minecraft.getInstance().font);
+    }
+
+    /** 开发用（自动截图）：打开交易界面，切到某个表格页，并在下单面板里填好数量。 */
+    public static void openForTrading(String tab, String quantity) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.tableTab = TableTab.valueOf(tab);
+            screen.orderPanel.setQuantity(quantity);
+        }
     }
 
     public static void open() {
@@ -75,6 +110,8 @@ public final class TradingScreen extends Screen {
     @Override
     protected void init() {
         ClientKlines.open();
+        // 输入框只登记为子部件（接收键盘和点击），不放进可渲染列表：它要画在下单面板的底色之上，由面板自己渲染
+        addWidget(orderPanel.quantityBox());
     }
 
     /** 单人游戏里打开交易界面不暂停游戏，市场照常推进。 */
@@ -90,6 +127,10 @@ public final class TradingScreen extends Screen {
             contractMenuOpen = false;
             return true;
         }
+        if (orderPanel.quantityBox().isFocused() && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+            // 在数量输入框里打字时，快捷键字母不能关掉界面
+            return super.keyPressed(event);
+        }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
             onClose();
             return true;
@@ -100,7 +141,18 @@ public final class TradingScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0 && clickedContractControls(event.x(), event.y())) {
+            orderPanel.quantityBox().setFocused(false);
             return true;
+        }
+        if (event.button() == 0) {
+            String symbol = ClientMarket.selectedSymbol().orElse(null);
+            if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
+                orderPanel.quantityBox().setFocused(false);
+                return true;
+            }
+            if (clickedTableControls(event.x(), event.y())) {
+                return true;
+            }
         }
         if (event.button() == 0 && event.y() >= tabsTop && event.y() < tabsTop + TAB_HEIGHT) {
             int x = PADDING;
@@ -114,6 +166,23 @@ public final class TradingScreen extends Screen {
             }
         }
         return super.mouseClicked(event, doubleClick);
+    }
+
+    /** 点在表格页签上切换页；点在仓位页的「市价平仓」上平仓。返回是否已处理这次点击。 */
+    private boolean clickedTableControls(double x, double y) {
+        if (y >= tableTop && y < tableTop + TABLE_TAB_HEIGHT) {
+            int left = PADDING;
+            for (TableTab tab : TableTab.values()) {
+                int tabWidth = font.width(tab.label()) + TAB_PADDING * 2;
+                if (x >= left && x < left + tabWidth) {
+                    tableTab = tab;
+                    return true;
+                }
+                left += tabWidth;
+            }
+            return false;
+        }
+        return tableTab == TableTab.POSITIONS && tables.mouseClicked(x, y);
     }
 
     /** 点在交易代码按钮上就展开/收起合约列表；列表展开时点列表项切换合约，点别处只收起列表。返回是否已处理这次点击。 */
@@ -181,8 +250,11 @@ public final class TradingScreen extends Screen {
         int tickerBottom = extractTicker(graphics, snapshot, mouseX, mouseY);
         tabsTop = tickerBottom + 5;
         extractTabs(graphics, mouseX, mouseY);
-        extractChart(graphics, tabsTop + TAB_HEIGHT + 4, mouseX, mouseY);
-        extractTable(graphics);
+        int panelLeft = width - PADDING - OrderPanel.WIDTH;
+        extractChart(graphics, tabsTop + TAB_HEIGHT + 4, panelLeft - PANEL_GAP, mouseX, mouseY);
+        orderPanel.extract(graphics, panelLeft, tabsTop, width - PADDING, height - TABLE_HEIGHT - 4, snapshot.symbol(), snapshot,
+                mouseX, mouseY, partialTick);
+        extractTable(graphics, mouseX, mouseY);
         if (contractMenuOpen) {
             extractContractMenu(graphics, snapshot.symbol(), mouseX, mouseY);
         }
@@ -338,29 +410,55 @@ public final class TradingScreen extends Screen {
         return font.width(period.label()) + TAB_PADDING * 2;
     }
 
-    private void extractChart(GuiGraphicsExtractor graphics, int top, int mouseX, int mouseY) {
+    private void extractChart(GuiGraphicsExtractor graphics, int top, int right, int mouseX, int mouseY) {
         int bottom = height - TABLE_HEIGHT - 4;
         List<Candle> candles = ClientKlines.candles();
         if (candles == null || candles.isEmpty()) {
             graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.kline.loading"),
-                    width / 2, centeredTextY(top, bottom), BinancePalette.TEXT_SECONDARY);
+                    right / 2, centeredTextY(top, bottom), BinancePalette.TEXT_SECONDARY);
             return;
         }
-        chart.extract(graphics, PADDING, top, width - PADDING, bottom, ClientKlines.selected(), candles, mouseX, mouseY);
+        chart.extract(graphics, PADDING, top, right, bottom, ClientKlines.selected(), candles, mouseX, mouseY);
     }
 
-    /** 底部表格区：页签（目前只有「资产」，黄字加下划线）和该页的数据；资产页显示钱包余额、未实现盈亏、保证金余额、可用余额。 */
-    private void extractTable(GuiGraphicsExtractor graphics) {
+    /** 底部表格区：一排页签（当前页黄字加下划线）和该页的数据：资产页是钱包余额等四项，仓位页和成交历史页是表格。 */
+    private void extractTable(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         int top = height - TABLE_HEIGHT;
+        tableTop = top;
         graphics.fill(0, top, width, height, BinancePalette.PANEL);
         graphics.horizontalLine(0, width, top, BinancePalette.DIVIDER);
-        Component tab = Component.translatable("screen.creepercapital.trading.table.assets");
-        int tabWidth = font.width(tab) + TAB_PADDING * 2;
-        graphics.text(font, tab, PADDING + TAB_PADDING, centeredTextY(top, top + TABLE_TAB_HEIGHT), BinancePalette.BRAND_YELLOW, false);
-        graphics.horizontalLine(PADDING + TAB_PADDING, PADDING + tabWidth - TAB_PADDING - 1, top + TABLE_TAB_HEIGHT - 1,
-                BinancePalette.BRAND_YELLOW);
+        int tabLeft = PADDING;
+        for (TableTab tab : TableTab.values()) {
+            Component label = tab.label();
+            int tabWidth = font.width(label) + TAB_PADDING * 2;
+            boolean selected = tab == tableTab;
+            boolean hovered = mouseX >= tabLeft && mouseX < tabLeft + tabWidth && mouseY >= top && mouseY < top + TABLE_TAB_HEIGHT;
+            graphics.text(font, label, tabLeft + TAB_PADDING, centeredTextY(top, top + TABLE_TAB_HEIGHT),
+                    selected ? BinancePalette.BRAND_YELLOW : hovered ? BinancePalette.TEXT_PRIMARY : BinancePalette.TEXT_SECONDARY, false);
+            if (selected) {
+                graphics.horizontalLine(tabLeft + TAB_PADDING, tabLeft + tabWidth - TAB_PADDING - 1, top + TABLE_TAB_HEIGHT - 1,
+                        BinancePalette.BRAND_YELLOW);
+            }
+            tabLeft += tabWidth;
+        }
         graphics.horizontalLine(0, width, top + TABLE_TAB_HEIGHT, BinancePalette.DIVIDER);
 
+        int bodyTop = top + TABLE_TAB_HEIGHT + 2;
+        switch (tableTab) {
+            case ASSETS -> {
+                tables.forgetButtons();
+                extractAssets(graphics, bodyTop);
+            }
+            case POSITIONS -> tables.extractPositions(graphics, PADDING, bodyTop, width - PADDING, height, mouseX, mouseY);
+            case TRADES -> {
+                tables.forgetButtons();
+                tables.extractTrades(graphics, PADDING, bodyTop, width - PADDING, height);
+            }
+        }
+    }
+
+    /** 资产页：钱包余额、未实现盈亏、保证金余额、可用余额，名称在上、数值在下。 */
+    private void extractAssets(GuiGraphicsExtractor graphics, int rowTop) {
         Assets assets = ClientAccount.assets();
         int pnlColor = assets.unrealizedPnl().units() > 0 ? BinancePalette.UP
                 : assets.unrealizedPnl().units() < 0 ? BinancePalette.DOWN : BinancePalette.TEXT_PRIMARY;
@@ -373,7 +471,6 @@ public final class TradingScreen extends Screen {
                         assets.marginBalance().toDisplayString() + " CRP", BinancePalette.TEXT_PRIMARY),
                 new Stat(Component.translatable("screen.creepercapital.trading.assets.available_balance"),
                         assets.availableBalance().toDisplayString() + " CRP", BinancePalette.TEXT_PRIMARY));
-        int rowTop = top + TABLE_TAB_HEIGHT + 2;
         int upperY = rowTop + (TICKER_ROW_HEIGHT - font.lineHeight * 2 - LINE_GAP) / 2;
         int x = PADDING;
         for (Stat stat : stats) {

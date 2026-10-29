@@ -5,8 +5,10 @@ import java.util.function.Consumer;
 
 import io.github.djp440.creepercapital.client.ClientKlines;
 import io.github.djp440.creepercapital.client.ClientMarket;
+import io.github.djp440.creepercapital.client.ClientTrading;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
+import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.Minecraft;
 
 /**
@@ -77,7 +79,30 @@ final class ScreenshotScript {
                             + "（还没有仓位，所以后三项中除未实现盈亏外都等于钱包余额）；刚执行过 /creeper dev deposit @p 12345.678901，"
                             + "余额已立即刷新而不是显示 0.00；K 线图被压缩到表格区之上，图表底部不与表格区重叠；无错位和乱码。",
                     View.TRADING,
-                    deposit("12345.678901")));
+                    deposit("12345.678901")),
+            new ScreenshotStep("11", "下单面板（GUNPOWDERCRP，3 级验收）",
+                    "图表右侧是宽约 168 的下单面板：标题「市价下单」和「逐仓」标签；杠杆一行有 − / + 按钮，当前 20x；"
+                            + "数量一栏单位为 GUNPOWDERCRP（数量精度 0 位，整数个），输入框里已填 2；"
+                            + "下方预估：可用余额 12,345.678901 CRP、预估成交价（约等于最新价 + 半个点差，开多按买价）、"
+                            + "预估保证金 = 名义价值 / 20、预估手续费 = 名义价值 × 0.05%；"
+                            + "底部是绿色「开多」、红色「开空」两个按钮和一个「平仓」按钮（没有仓位时不会成交）；"
+                            + "面板不越出屏幕，图表区被压窄但不与面板重叠，无错位和乱码。",
+                    View.ORDER_PANEL,
+                    leverage("GUNPOWDERCRP", 20)),
+            new ScreenshotStep("12", "仓位页（3 级验收）",
+                    "表格区的「仓位」页签为黄字加下划线；表头：合约、数量、开仓均价、标记价格、保证金、未实现盈亏（收益率）、操作；"
+                            + "两行仓位：GUNPOWDERCRP 20x 多 50 个（绿字）和 DIAMONDCRP 10x 空 1.500 个（红字）；"
+                            + "开仓均价与标记价格相差约半个点差，未实现盈亏随标记价格变化且带正负号与收益率百分比（盈绿亏红）；"
+                            + "每行末尾有「市价平仓」按钮；下单面板里显示当前仓位的杠杆已锁定；列不重叠、无乱码。",
+                    View.POSITIONS,
+                    openPositions()),
+            new ScreenshotStep("13", "成交历史页（3 级验收）",
+                    "表格区的「成交历史」页签为黄字加下划线；表头：时间、合约、方向、成交价、数量、手续费、已实现盈亏；"
+                            + "最新的在最上面：先是 GUNPOWDERCRP 平多（平仓，已实现盈亏非 \"--\"，带正负号和涨跌色），"
+                            + "下面是开多 GUNPOWDERCRP、开空 DIAMONDCRP 的开仓记录（已实现盈亏显示 \"--\"）；"
+                            + "每笔手续费 = 名义价值 × 0.05%，开多成交价高于最新价、开空成交价低于最新价；列不重叠、无乱码。",
+                    View.TRADES,
+                    closeGunpowder()));
 
     private ScreenshotScript() {
     }
@@ -89,6 +114,29 @@ final class ScreenshotScript {
     /** 以玩家自己的身份执行 dev 充值命令（截图世界里玩家是 OP），验证调账后资产页立即刷新。 */
     private static Consumer<Minecraft> deposit(String amount) {
         return minecraft -> minecraft.player.connection.sendCommand("creeper dev deposit @p " + amount);
+    }
+
+    private static Consumer<Minecraft> leverage(String symbol, int leverage) {
+        return minecraft -> {
+            ClientTrading.selectLeverage(symbol, leverage);
+            ClientTrading.clearResult();
+        };
+    }
+
+    /** 开两个仓位：GUNPOWDERCRP 20x 多 50 个，DIAMONDCRP 10x 空 1.500 个（1500 手）。 */
+    private static Consumer<Minecraft> openPositions() {
+        return minecraft -> {
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 20);
+            ClientTrading.send(OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 50);
+            ClientTrading.selectLeverage("DIAMONDCRP", 10);
+            ClientTrading.send(OrderPayload.Action.OPEN_SHORT, "DIAMONDCRP", 1500);
+        };
+    }
+
+    /** 全平 GUNPOWDERCRP 的仓位，让成交历史里有一笔带已实现盈亏的平仓。 */
+    private static Consumer<Minecraft> closeGunpowder() {
+        return minecraft -> ClientTrading.position("GUNPOWDERCRP")
+                .ifPresent(position -> ClientTrading.send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", position.lots()));
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {
