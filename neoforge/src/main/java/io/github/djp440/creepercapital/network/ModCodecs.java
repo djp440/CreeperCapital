@@ -4,9 +4,11 @@ import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.kline.Stats24h;
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketTrade;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.OrderType;
@@ -45,6 +47,19 @@ final class ModCodecs {
     static final StreamCodec<ByteBuf, TradeKind> TRADE_KIND =
             ByteBufCodecs.VAR_INT.map(ordinal -> TradeKind.values()[Math.floorMod(ordinal, TradeKind.values().length)], TradeKind::ordinal);
 
+    static final StreamCodec<ByteBuf, MarginMode> MARGIN_MODE = ByteBufCodecs.VAR_INT
+            .map(ordinal -> MarginMode.values()[Math.floorMod(ordinal, MarginMode.values().length)], MarginMode::ordinal);
+
+    static final StreamCodec<ByteBuf, MarginTiers.Definition> MARGIN_TIER = StreamCodec.composite(
+            MONEY, MarginTiers.Definition::upTo,
+            ByteBufCodecs.VAR_INT, MarginTiers.Definition::maxLeverage,
+            ByteBufCodecs.DOUBLE, MarginTiers.Definition::maintenanceRate,
+            MarginTiers.Definition::new);
+
+    /** 分档同步给客户端：界面据此用和服务端同一份公式算保证金率与强平价；档位至多 16 档防止恶意数据。 */
+    static final StreamCodec<ByteBuf, MarginTiers> MARGIN_TIERS = MARGIN_TIER.apply(ByteBufCodecs.list(16))
+            .map(MarginTiers::of, MarginTiers::definitions);
+
     static final StreamCodec<ByteBuf, Position> POSITION = StreamCodec.composite(
             SYMBOL, Position::symbol,
             SIDE, Position::side,
@@ -53,6 +68,7 @@ final class ModCodecs {
             ByteBufCodecs.VAR_INT, Position::leverage,
             MONEY, Position::margin,
             ByteBufCodecs.VAR_INT, Position::quantityDecimals,
+            MARGIN_MODE, Position::mode,
             Position::new);
 
     static final StreamCodec<ByteBuf, PlayerTrade> TRADE = StreamCodec.composite(
@@ -117,6 +133,7 @@ final class ModCodecs {
             ByteBufCodecs.VAR_INT, TradingParams::maxLeverage,
             ByteBufCodecs.VAR_INT, TradingParams::quantityDecimals,
             ByteBufCodecs.DOUBLE, TradingParams::depthSlippage,
+            MARGIN_TIERS, TradingParams::marginTiers,
             TradingParams::new);
 
     static final StreamCodec<ByteBuf, Stats24h> STATS_24H = StreamCodec.composite(

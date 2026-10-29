@@ -3,10 +3,13 @@ package io.github.djp440.creepercapital.client;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTime;
+import io.github.djp440.creepercapital.core.trading.MarginMath;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
@@ -23,14 +26,15 @@ import net.minecraft.network.chat.Component;
 /**
  * 底部表格区里的「仓位」「当前委托」「历史委托」「成交历史」页。
  * <p>
- * 仓位页每个行情步按标记价格重算每个仓位的未实现盈亏和收益率（收益率 = 盈亏 / 保证金），每行末尾有「市价平仓」按钮；
+ * 仓位页每个行情步按标记价格重算每个仓位的未实现盈亏和收益率（收益率 = 盈亏 / 保证金）、保证金率和预估强平价，
+ * 每行末尾有「市价平仓」按钮；
  * 成交历史页列出最近的玩家成交（最新的在前），含手续费和已实现盈亏。
  * 当前委托页列出挂着的限价委托，每行末尾有「撤单」按钮；历史委托页列出已成交和已撤销的委托（最新的在前）。
  */
 final class TradeTables {
     static final int ROW_HEIGHT = 12;
     static final int HEADER_HEIGHT = 12;
-    private static final int[] POSITION_WEIGHTS = {21, 10, 12, 12, 12, 22, 11};
+    private static final int[] POSITION_WEIGHTS = {24, 8, 10, 10, 10, 8, 13, 21, 9};
     private static final int[] TRADE_WEIGHTS = {19, 14, 9, 13, 11, 12, 16};
     private static final int[] OPEN_ORDER_WEIGHTS = {15, 14, 9, 8, 13, 11, 16, 8};
     private static final int[] ORDER_HISTORY_WEIGHTS = {14, 13, 8, 7, 11, 11, 10, 11, 15};
@@ -57,12 +61,15 @@ final class TradeTables {
     void extractPositions(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, int mouseX, int mouseY) {
         forgetButtons();
         int[] columns = columns(left, right, POSITION_WEIGHTS);
-        header(graphics, top, columns, "symbol", "size", "entry_price", "mark_price", "margin", "pnl", "action");
+        header(graphics, top, columns, "symbol", "size", "entry_price", "mark_price", "liq_price", "margin_ratio", "margin",
+                "pnl", "action");
         List<Position> positions = ClientTrading.positions();
         if (positions.isEmpty()) {
             empty(graphics, left, right, top + HEADER_HEIGHT, bottom, "screen.creepercapital.trading.positions.empty");
             return;
         }
+        // 保证金率与预估强平价由 core 的 MarginMath 算（服务端强平用同一份），全仓仓位共用一个保证金率
+        Map<String, MarginMath.PositionRisk> risks = ClientTrading.risks();
         int rows = Math.max(1, (bottom - top - HEADER_HEIGHT) / ROW_HEIGHT);
         for (int i = 0; i < Math.min(rows, positions.size()); i++) {
             Position position = positions.get(i);
@@ -73,14 +80,23 @@ final class TradeTables {
             double roe = position.returnOnEquity(mark);
             int sideColor = position.side() == Side.LONG ? BinancePalette.UP : BinancePalette.DOWN;
             int pnlColor = pnl.units() > 0 ? BinancePalette.UP : pnl.units() < 0 ? BinancePalette.DOWN : BinancePalette.TEXT_PRIMARY;
-            cell(graphics, columns[0], y, position.symbol() + " " + position.leverage() + "x", sideColor);
+            String mode = Component.translatable(position.mode() == MarginMode.CROSS
+                    ? "screen.creepercapital.trading.order.cross" : "screen.creepercapital.trading.order.isolated").getString();
+            MarginMath.PositionRisk risk = risks.get(position.symbol());
+            double ratio = risk == null ? 0 : risk.marginRatio();
+            int ratioColor = ratio >= 0.8 ? BinancePalette.DOWN : ratio >= 0.5 ? BinancePalette.BRAND_YELLOW : BinancePalette.TEXT_PRIMARY;
+            String liquidation = risk == null || risk.liquidationPrice().isEmpty() ? "--"
+                    : MarketFormat.price(risk.liquidationPrice().getAsDouble());
+            cell(graphics, columns[0], y, position.symbol() + " " + mode + " " + position.leverage() + "x", sideColor);
             cell(graphics, columns[1], y, Quantities.format(position.lots(), position.quantityDecimals()), sideColor);
             cell(graphics, columns[2], y, MarketFormat.price(position.entryPrice()), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[3], y, MarketFormat.price(mark), BinancePalette.TEXT_PRIMARY);
-            cell(graphics, columns[4], y, position.margin().toDisplayString(), BinancePalette.TEXT_PRIMARY);
-            cell(graphics, columns[5], y, signedMoney(pnl) + " (" + MarketFormat.signedPercent(roe) + ")", pnlColor);
+            cell(graphics, columns[4], y, liquidation, BinancePalette.BRAND_YELLOW);
+            cell(graphics, columns[5], y, MarginMath.formatRatio(ratio), ratioColor);
+            cell(graphics, columns[6], y, position.margin().toDisplayString(), BinancePalette.TEXT_PRIMARY);
+            cell(graphics, columns[7], y, signedMoney(pnl) + " (" + MarketFormat.signedPercent(roe) + ")", pnlColor);
             Component label = Component.translatable("screen.creepercapital.trading.positions.close");
-            int[] box = {columns[6], y, columns[6] + font.width(label) + 8, y + ROW_HEIGHT - 1};
+            int[] box = {columns[8], y, columns[8] + font.width(label) + 8, y + ROW_HEIGHT - 1};
             boolean hovered = mouseX >= box[0] && mouseX < box[2] && mouseY >= box[1] && mouseY < box[3];
             graphics.fill(box[0], box[1], box[2], box[3], hovered ? BUTTON_HOVER : BUTTON_BACKGROUND);
             graphics.text(font, label, box[0] + 4, y + 2, BinancePalette.TEXT_PRIMARY, false);

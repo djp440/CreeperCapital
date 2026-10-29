@@ -39,6 +39,14 @@ public sealed interface TradeResult {
         CLOSE_EXCEEDS_POSITION,
         /** 成交价不是正数（价格已低于半个点差）。 */
         INVALID_PRICE,
+        /** 仓位名义价值超过该杠杆下的档位上限；参数：该杠杆下允许的最大名义价值（CRP）。 */
+        POSITION_LIMIT,
+        /** 该合约有仓位或委托，不能切换保证金模式。 */
+        MARGIN_MODE_LOCKED,
+        /** 新杠杆超过当前名义价值所在档位的上限；参数：该档位的最高杠杆、当前名义价值（CRP）。 */
+        LEVERAGE_ABOVE_TIER,
+        /** 调整杠杆后仓位的保证金率会达到 100%（会被强平）；参数：调整后的保证金率（百分比文本）。 */
+        LEVERAGE_UNSAFE,
         /** 挂着的委托已达上限；参数：上限。 */
         TOO_MANY_ORDERS
     }

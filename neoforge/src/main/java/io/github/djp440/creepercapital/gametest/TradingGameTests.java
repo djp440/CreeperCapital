@@ -13,14 +13,18 @@ import java.util.function.Consumer;
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
+import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.MarginMode;
+import io.github.djp440.creepercapital.core.trading.MarginResult;
 import io.github.djp440.creepercapital.core.trading.Order;
 import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
+import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
 import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradeResult;
@@ -35,7 +39,10 @@ import io.github.djp440.creepercapital.server.ServerAccounts;
 import io.github.djp440.creepercapital.server.ServerMarket;
 import io.github.djp440.creepercapital.server.ServerTrading;
 import io.github.djp440.creepercapital.server.TradingSavedData;
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import io.netty.buffer.Unpooled;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -75,6 +82,14 @@ final class TradingGameTests {
                 throw new UncheckedIOException(e);
             }
         });
+        function.accept("margin_orders_switch_mode_and_adjust_leverage", TradingGameTests::marginOrdersSwitchModeAndAdjustLeverage);
+        function.accept("margin_modes_survive_save_and_reload_and_old_saves_default_to_isolated", helper -> {
+            try {
+                marginModesSurviveSaveAndReloadAndOldSavesDefaultToIsolated(helper);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
         LimitOrderGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
@@ -101,14 +116,15 @@ final class TradingGameTests {
 
         UUID player = UUID.randomUUID();
         TradingStatePayload state = new TradingStatePayload(
-                List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005)),
-                List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3)),
+                List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005, MarginTiers.standard(125))),
+                List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3, MarginMode.CROSS)),
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
                         Money.parse("-0.000001"), 86400)),
                 List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
                                 OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
                         new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
-                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)));
+                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)),
+                List.of(DIAMOND));
         TradingStatePayload.STREAM_CODEC.encode(buffer, state);
         helper.assertValueEqual(TradingStatePayload.STREAM_CODEC.decode(buffer), state, "交易状态载荷");
 
@@ -134,6 +150,10 @@ final class TradingGameTests {
         for (Position position : book.positions(player.getUUID())) {
             book.close(player.getUUID(), ServerMarket.spec(position.symbol()), ServerMarket.snapshot(position.symbol()),
                     position.lots());
+        }
+        // 共用的账本里不留全仓设置（平完仓位后才能切回）
+        for (String symbol : ServerMarket.symbols()) {
+            book.setMarginMode(player.getUUID(), symbol, MarginMode.ISOLATED);
         }
         Money left = ServerAccounts.balance(player.getUUID());
         if (left.isPositive()) {
@@ -249,7 +269,9 @@ final class TradingGameTests {
             long lots = spec.liquidityCurve(before.lastPrice()).levelLots() * 40;
             double expected = spec.liquidityCurve(before.lastPrice()).averageFillPrice(true, lots);
 
-            ServerTrading.handleOrder(whale, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, lots, 20));
+            // 杠杆取低一点：缺省分档里高杠杆只允许小仓位（20x 只到 5,000 CRP 名义价值），2 万 CRP 的大单要用低杠杆才不触发仓位上限
+            int leverage = Math.min(5, spec.maxLeverage());
+            ServerTrading.handleOrder(whale, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, lots, leverage));
             Position big = ServerTrading.book().position(whale.getUUID(), gunpowder).orElseThrow();
             helper.assertValueEqual(big.entryPrice(), expected, "大单成交价 = 曲线按这个数量算出的均价");
             // 名义价值超过参考单，平均滑点至少是合约标定的滑点（曲线单调）
@@ -430,25 +452,161 @@ final class TradingGameTests {
                             "jump_max": 0.12,
                             "premium_bias": 0.002
                           }
+                        },
+                        {
+                          "symbol": "TIEREDCRP",
+                          "underlying": "minecraft:iron_ingot",
+                          "initial_price": 50.0,
+                          "base_volume": 10.0,
+                          "volatility": {
+                            "daily_volatility": 0.06,
+                            "jumps_per_day": 0.5,
+                            "jump_min": 0.04,
+                            "jump_max": 0.12,
+                            "premium_bias": 0.002
+                          },
+                          "max_leverage": 10,
+                          "maintenance_tiers": [
+                            { "up_to": 1000.0, "max_leverage": 10, "maintenance_rate": 0.01 },
+                            { "up_to": 5000.0, "max_leverage": 5, "maintenance_rate": 0.025 }
+                          ]
                         }
                       ]
                     }
                     """, StandardCharsets.UTF_8);
+            String original = Files.readString(file, StandardCharsets.UTF_8);
 
             List<ContractSpec> loaded = ContractConfig.load(file);
 
-            helper.assertValueEqual(loaded.get(0).trading(), new TradingParams("CUSTOMCRP", 0.4, 75, 2, 0.002), "配置里写的交易参数");
-            helper.assertValueEqual(loaded.get(1).trading(), new TradingParams("PLAINCRP", 0.04, 20, 3, 0.001), "没写的用默认值");
+            // 没写分档的合约（含 #11 之前的旧配置文件）按最高杠杆推出缺省分档，而且不回写用户的文件
+            helper.assertValueEqual(loaded.get(0).trading(),
+                    new TradingParams("CUSTOMCRP", 0.4, 75, 2, 0.002, MarginTiers.standard(75)), "配置里写的交易参数");
+            helper.assertValueEqual(loaded.get(1).trading(),
+                    new TradingParams("PLAINCRP", 0.04, 20, 3, 0.001, MarginTiers.standard(20)), "没写的用默认值");
+            MarginTiers tiered = MarginTiers.of(List.of(
+                    new MarginTiers.Definition(Money.parse("1000"), 10, 0.01),
+                    new MarginTiers.Definition(Money.parse("5000"), 5, 0.025)));
+            helper.assertValueEqual(loaded.get(2).marginTiers(), tiered, "配置里写的维持保证金分档");
+            helper.assertValueEqual(loaded.get(2).marginTiers().maxLeverageAt(Money.parse("2000")), 5, "第二档的杠杆上限");
+            helper.assertValueEqual(Files.readString(file, StandardCharsets.UTF_8), original, "读取不回写用户的配置文件");
             helper.assertValueEqual(ContractConfig.load(file).get(0), loaded.get(0), "再读一遍结果一致");
             Path generated = directory.resolve("generated.json");
             ContractConfig.load(generated);
             helper.assertTrue(Files.readString(generated, StandardCharsets.UTF_8).contains("\"max_leverage\": 125"),
                     "自动生成的配置文件里带着交易参数，方便调整");
+            helper.assertTrue(Files.readString(generated, StandardCharsets.UTF_8).contains("maintenance_tiers"),
+                    "自动生成的配置文件里带着维持保证金分档");
+            helper.assertValueEqual(ContractConfig.load(generated), ContractSpec.defaults(), "生成的配置读回来与内置合约一致（含分档）");
             helper.assertTrue(Files.readString(generated, StandardCharsets.UTF_8).contains("\"depth_slippage\": 0.003"),
                     "自动生成的配置文件里带着流动性深度");
         } finally {
             deleteRecursively(directory);
         }
+        helper.succeed();
+    }
+
+    /**
+     * 保证金设置的下单链路：切全仓、全仓开仓、有仓位时切模式被拒、仓位的杠杆调整（保证金按新杠杆重算、总额不变）、
+     * 平仓后再切回逐仓。价格和合约参数都取自活市场，不假设具体数值。
+     */
+    private static void marginOrdersSwitchModeAndAdjustLeverage(GameTestHelper helper) {
+        ServerPlayer player = trader(helper, "MarginTrader1", "100000");
+        try {
+            UUID id = player.getUUID();
+            ContractSpec spec = ServerMarket.spec(DIAMOND);
+            long oneUnit = Quantities.parseLots("1", spec.quantityDecimals()).getAsLong();
+            int leverage = Math.min(10, spec.maxLeverage());
+            int lower = Math.max(1, leverage - 1);
+            Money totalBefore = total(id);
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_CROSS, DIAMOND, 0, 0));
+            OrderResultPayload crossed = last(MockClient.received(player, OrderResultPayload.class));
+            helper.assertValueEqual(crossed.code(), "set_cross", "切全仓的结果");
+            helper.assertTrue(last(MockClient.received(player, TradingStatePayload.class)).crossSymbols().contains(DIAMOND),
+                    "同步给玩家的状态里这个合约是全仓");
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, oneUnit, leverage));
+            helper.assertValueEqual(last(MockClient.received(player, OrderResultPayload.class)).code(), "open_long", "全仓开多");
+            Position opened = ServerTrading.book().position(id, DIAMOND).orElseThrow();
+            helper.assertValueEqual(opened.mode(), MarginMode.CROSS, "新仓位沿用全仓");
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_ISOLATED, DIAMOND, 0, 0));
+            OrderResultPayload locked = last(MockClient.received(player, OrderResultPayload.class));
+            helper.assertFalse(locked.success(), "有仓位时不能切换保证金模式");
+            helper.assertValueEqual(locked.code(), "margin_mode_locked", "拒绝原因");
+            helper.assertValueEqual(ServerTrading.book().marginMode(id, DIAMOND), MarginMode.CROSS, "拒绝后模式不变");
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_LEVERAGE, DIAMOND, 0, lower));
+            OrderResultPayload adjusted = last(MockClient.received(player, OrderResultPayload.class));
+            helper.assertValueEqual(adjusted.code(), "set_leverage", "调整杠杆的结果");
+            Position after = ServerTrading.book().position(id, DIAMOND).orElseThrow();
+            helper.assertValueEqual(after.leverage(), lower, "仓位的杠杆已调整");
+            helper.assertTrue(lower == leverage || after.margin().compareTo(opened.margin()) > 0, "降低杠杆需要更多保证金");
+            helper.assertValueEqual(after.lots(), opened.lots(), "调整杠杆不改变数量");
+            helper.assertValueEqual(total(id), totalBefore, "调整杠杆只在可用余额与保证金之间划转，玩家、保证金、池子的总额不变");
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_LEVERAGE, DIAMOND, 0, spec.maxLeverage() + 1));
+            helper.assertValueEqual(last(MockClient.received(player, OrderResultPayload.class)).code(), "invalid_leverage",
+                    "杠杆超过合约上限被拒");
+            helper.assertValueEqual(ServerTrading.book().position(id, DIAMOND).orElseThrow().leverage(), lower, "被拒后杠杆不变");
+
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, oneUnit, 0));
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_ISOLATED, DIAMOND, 0, 0));
+            helper.assertValueEqual(last(MockClient.received(player, OrderResultPayload.class)).code(), "set_isolated",
+                    "平仓后可以切回逐仓");
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.SET_LEVERAGE, DIAMOND, 0, leverage));
+            helper.assertValueEqual(last(MockClient.received(player, OrderResultPayload.class)).code(), "no_position",
+                    "没有仓位时不能调整杠杆");
+        } finally {
+            finish(player);
+        }
+        helper.succeed();
+    }
+
+    /** 全仓仓位与全仓设置写进存档后原样读回；没有保证金字段的旧存档读出来都是逐仓、没有全仓设置。 */
+    private static void marginModesSurviveSaveAndReloadAndOldSavesDefaultToIsolated(GameTestHelper helper) throws IOException {
+        ServerLevel level = helper.getLevel();
+        UUID alice = UUID.randomUUID();
+        ContractSpec diamond = ContractSpec.defaults().get(0);
+        MarketSnapshot at = new MarketSnapshot(100, DIAMOND, 1000, 1000, 1000, 0.0001, 0);
+        Path dataFolder = Files.createTempDirectory("creepercapital-margin");
+        try {
+            AccountBook accounts = new AccountBook();
+            accounts.deposit(alice, Money.parse("100000"));
+            SavedDataStorage writer = new SavedDataStorage(level, dataFolder, DataFixers.getDataFixer(), level.registryAccess());
+            TradingSavedData data = writer.computeIfAbsent(TradingSavedData.TYPE);
+            TradingBook book = data.bind(accounts);
+            helper.assertTrue(book.setMarginMode(alice, DIAMOND, MarginMode.CROSS) instanceof MarginResult.Applied, "切全仓");
+            book.open(alice, diamond, at, Side.LONG, 2000, 10);
+            helper.assertTrue(book.setMarginMode(alice, "GUNPOWDERCRP", MarginMode.CROSS) instanceof MarginResult.Applied,
+                    "没有仓位的合约也能预先设为全仓");
+            data.setDirty();
+            writer.saveAndJoin();
+            writer.close();
+
+            SavedDataStorage reader = new SavedDataStorage(level, dataFolder, DataFixers.getDataFixer(), level.registryAccess());
+            TradingBook restored = reader.get(TradingSavedData.TYPE).bind(accounts);
+            helper.assertValueEqual(restored.position(alice, DIAMOND).orElseThrow().mode(), MarginMode.CROSS, "全仓仓位读回");
+            helper.assertValueEqual(restored.position(alice, DIAMOND), book.position(alice, DIAMOND), "仓位整体一致");
+            helper.assertValueEqual(restored.marginMode(alice, "GUNPOWDERCRP"), MarginMode.CROSS, "没有仓位的全仓设置读回");
+            helper.assertValueEqual(restored.marginMode(alice, "OTHERCRP"), MarginMode.ISOLATED, "其他合约仍是缺省逐仓");
+            reader.close();
+        } finally {
+            deleteRecursively(dataFolder);
+        }
+
+        // #11 之前的存档：仓位里没有 margin_mode，顶层没有 margin_modes
+        String oldSave = """
+                {"pool": 1000000000000, "last_trade_id": 0,
+                 "positions": [{"player": %s,
+                   "position": {"symbol": "DIAMONDCRP", "side": "LONG", "lots": 1000, "entry_price": 1000.0,
+                                "leverage": 10, "margin": 100000000, "quantity_decimals": 3}}],
+                 "trades": []}
+                """.formatted(java.util.Arrays.toString(UUIDUtil.uuidToIntArray(alice)));
+        TradingSavedData legacy = TradingSavedData.CODEC.parse(JsonOps.INSTANCE, JsonParser.parseString(oldSave)).getOrThrow();
+        TradingBook legacyBook = legacy.bind(new AccountBook());
+        helper.assertValueEqual(legacyBook.position(alice, DIAMOND).orElseThrow().mode(), MarginMode.ISOLATED, "旧存档的仓位是逐仓");
+        helper.assertValueEqual(legacyBook.marginMode(alice, DIAMOND), MarginMode.ISOLATED, "旧存档没有全仓设置");
         helper.succeed();
     }
 

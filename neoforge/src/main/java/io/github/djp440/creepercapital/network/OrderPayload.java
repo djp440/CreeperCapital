@@ -7,8 +7,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 /**
- * 客户端 → 服务端：玩家的委托意图（开多、开空、平仓；市价或限价）。服务端校验一切，不信任客户端；
- * 平仓时杠杆字段被忽略，市价单时价格字段被忽略，目前限价只支持开仓。
+ * 客户端 → 服务端：玩家的委托意图（开多、开空、平仓；市价或限价），以及切换保证金模式、调整杠杆。服务端校验一切，不信任客户端；
+ * 平仓时杠杆字段被忽略，市价单时价格字段被忽略，目前限价只支持开仓；保证金设置（SET_*）只看合约，调杠杆时只看杠杆字段。
  *
  * @param action    动作
  * @param symbol    交易代码
@@ -24,7 +24,18 @@ public record OrderPayload(Action action, String symbol, long lots, int leverage
     public enum Action {
         OPEN_LONG,
         OPEN_SHORT,
-        CLOSE
+        CLOSE,
+        /** 把这个合约的保证金模式设为全仓（{@code lots} 与 {@code leverage} 被忽略）。 */
+        SET_CROSS,
+        /** 把这个合约的保证金模式设为逐仓（{@code lots} 与 {@code leverage} 被忽略）。 */
+        SET_ISOLATED,
+        /** 把已有仓位的杠杆调成 {@code leverage}（{@code lots} 被忽略）。 */
+        SET_LEVERAGE;
+
+        /** 是保证金设置（切换模式、调杠杆）而不是成交。 */
+        public boolean isMarginSetting() {
+            return this == SET_CROSS || this == SET_ISOLATED || this == SET_LEVERAGE;
+        }
     }
 
     /** 委托的执行方式：市价立即成交，限价挂在服务端等价格穿越。 */
