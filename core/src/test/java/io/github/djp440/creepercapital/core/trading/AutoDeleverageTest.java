@@ -162,6 +162,26 @@ class AutoDeleverageTest {
     }
 
     @Test
+    @DisplayName("离线汇总（#19）：自动减仓记成交额，等于成交历史里那行的价格 x 数量（甲 100 x 10 = 1000，乙 100 x 16 = 1600）")
+    void offlineSummaryMatchesTheTradeHistory() {
+        threePlayers("100");
+        OfflineSummaries summaries = OfflineSummaries.restore(Map.of());
+
+        for (AutoDeleverageEvent event : book.checkSolvency(mark(130), SECONDS)) {
+            summaries.record(event, GUNPOWDER.quantityDecimals());
+        }
+
+        OfflineSummaries.Summary a = summaries.pending(A);
+        assertEquals(1, a.count(OfflineSummaries.EventType.AUTO_DELEVERAGE));
+        assertEquals(Money.parse("1000"), a.amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
+        PlayerTrade tradeA = book.trades(A).get(0);
+        assertEquals(TradingBook.notional(tradeA.price(), tradeA.lots(), GUNPOWDER.quantityDecimals()),
+                a.amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
+        assertEquals(Money.parse("1600"), summaries.pending(B).amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
+        assertFalse(summaries.hasPending(C));
+    }
+
+    @Test
     @DisplayName("限定玩家：只缩减允许的玩家，其他人不动（GameTest 共用账本时用）")
     void restrictedToSomePlayers() {
         threePlayers("100");

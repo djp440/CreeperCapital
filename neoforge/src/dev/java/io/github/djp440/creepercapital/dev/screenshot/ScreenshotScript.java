@@ -211,7 +211,15 @@ final class ScreenshotScript {
                             + "右侧下单面板底部的结果行是红字「DIAMONDCRP 被强平」，完整显示、不被截断；"
                             + "下面是之前的平仓 / 开仓记录；DIAMONDCRP 的止盈单随仓位消失（可到「历史委托」页看到「已失效（仓位已平）」）；列不重叠、无乱码。",
                     View.TRADES,
-                    liquidateDiamondShort()));
+                    liquidateDiamondShort()),
+            new ScreenshotStep("27", "ADL 指示灯（仓位页，3 级验收）",
+                    "表格区在「仓位」页，表头在「未实现盈亏（收益率）」与「操作」之间多了一列「ADL」；"
+                            + "刚以 10x 开了 DIAMONDCRP 多头 1.500 个，并用 /creeper dev market jump 让 GUNPOWDERCRP 上涨约 8%、DIAMONDCRP 上涨约 4%，两个仓位都盈利（绿字）："
+                            + "盈利率 x 杠杆得分更高的是 DIAMONDCRP 10x（约 4.0），GUNPOWDERCRP 全仓 5x 次之（约 2.0），"
+                            + "所以 ADL 列里 DIAMONDCRP 一行的五根小柱全亮（黄色，柱子逐根增高）、GUNPOWDERCRP 一行亮三根（前三根黄、后两根深灰）；"
+                            + "两行的灯数不同且与盈利率排序一致；这一列不与相邻的盈亏列、操作列的「市价平仓」按钮重叠或被截断，其余列无乱码。",
+                    View.POSITIONS,
+                    openDiamondLongAndJump()));
 
     private ScreenshotScript() {
     }
@@ -343,6 +351,22 @@ final class ScreenshotScript {
                     .filter(order -> order.symbol().equals("DIAMONDCRP") && !order.reduceOnly())
                     .forEach(order -> ClientTrading.cancel(order.id()));
             minecraft.player.connection.sendCommand("creeper dev market jump DIAMONDCRP 15");
+        };
+    }
+
+    /**
+     * 让仓位页有两个盈利仓位、ADL 灯数不同：以 10x 开 DIAMONDCRP 多头 1.500 个（上一步它的空头刚被强平，已没有仓位），
+     * 再让 GUNPOWDERCRP（全仓 5x 多头 300 个）上涨约 8%、DIAMONDCRP 上涨约 4% 。
+     * 得分 = 盈利率 x 杠杆：DIAMONDCRP 约 0.4 x 10 = 4.0，GUNPOWDERCRP 约 0.4 x 5 = 2.0，所以 DIAMONDCRP 排第一（5 格）、GUNPOWDERCRP 排第二（3 格）。
+     * 开仓包先于跳涨命令被服务端处理，开仓价是跳涨之前的价格。
+     */
+    private static Consumer<Minecraft> openDiamondLongAndJump() {
+        return minecraft -> {
+            ClientTrading.setLimitMode(false);
+            ClientTrading.selectLeverage("DIAMONDCRP", 10);
+            ClientTrading.send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 1500);
+            minecraft.player.connection.sendCommand("creeper dev market jump GUNPOWDERCRP 8");
+            minecraft.player.connection.sendCommand("creeper dev market jump DIAMONDCRP 4");
         };
     }
 

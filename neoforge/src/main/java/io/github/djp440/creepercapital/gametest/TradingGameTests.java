@@ -33,6 +33,7 @@ import io.github.djp440.creepercapital.core.trading.TradeResult;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.core.trading.TriggerSource;
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
@@ -97,6 +98,7 @@ final class TradingGameTests {
         FundingGameTests.register(function);
         ProtectionGameTests.register(function);
         LiquidationGameTests.register(function);
+        AdlGameTests.register(function);
         OfflineSummaryGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
@@ -136,7 +138,8 @@ final class TradingGameTests {
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
                         Money.parse("-0.000001"), 86400),
                         new PlayerTrade(8, player, DIAMOND, Side.LONG, TradeKind.LIQUIDATION, 950.5, 2500, Money.parse("11.88125"),
-                                Money.parse("-125.5"), 86500)),
+                                Money.parse("-125.5"), 86500),
+                        new PlayerTrade(10, player, DIAMOND, Side.LONG, TradeKind.ADL, 999.75, 700, Money.ZERO, Money.ZERO, 86600)),
                 List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
                                 OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
                         new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
@@ -158,6 +161,10 @@ final class TradingGameTests {
         OrderResultPayload result = new OrderResultPayload(false, "insufficient_balance", List.of("201.05025", "100.00"));
         OrderResultPayload.STREAM_CODEC.encode(buffer, result);
         helper.assertValueEqual(OrderResultPayload.STREAM_CODEC.decode(buffer), result, "下单结果载荷");
+
+        AdlLightsPayload lights = new AdlLightsPayload(java.util.Map.of(DIAMOND, 4, "GUNPOWDERCRP", 1));
+        AdlLightsPayload.STREAM_CODEC.encode(buffer, lights);
+        helper.assertValueEqual(AdlLightsPayload.STREAM_CODEC.decode(buffer), lights, "ADL 指示灯载荷");
         helper.succeed();
     }
 
@@ -477,7 +484,8 @@ final class TradingGameTests {
                           "spread": 0.4,
                           "max_leverage": 75,
                           "quantity_decimals": 2,
-                          "depth_slippage": 0.002
+                          "depth_slippage": 0.002,
+                          "open_interest_ratio": 0.3
                         },
                         {
                           "symbol": "PLAINCRP",
@@ -522,6 +530,10 @@ final class TradingGameTests {
                     new TradingParams("CUSTOMCRP", 0.4, 75, 2, 0.002, MarginTiers.standard(75)), "配置里写的交易参数");
             helper.assertValueEqual(loaded.get(1).trading(),
                     new TradingParams("PLAINCRP", 0.04, 20, 3, 0.001, MarginTiers.standard(20)), "没写的用默认值");
+            // 持仓总量上限比例（#17）：写了的按配置，没写的（含旧配置文件）是 50%
+            helper.assertValueEqual(loaded.get(0).openInterestRatio(), 0.3, "配置里写的持仓总量上限比例");
+            helper.assertValueEqual(loaded.get(1).openInterestRatio(), ContractSpec.DEFAULT_OPEN_INTEREST_RATIO,
+                    "没写的是缺省 50%");
             MarginTiers tiered = MarginTiers.of(List.of(
                     new MarginTiers.Definition(Money.parse("1000"), 10, 0.01),
                     new MarginTiers.Definition(Money.parse("5000"), 5, 0.025)));

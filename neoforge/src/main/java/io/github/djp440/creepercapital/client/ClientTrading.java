@@ -20,6 +20,7 @@ import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.TriggerSource;
+import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
@@ -48,6 +49,8 @@ public final class ClientTrading {
     private static Set<String> crossSymbols = Set.of();
     private static List<Order> orders = List.of();
     private static List<FundingRecord> funding = List.of();
+    /** 各合约仓位的 ADL 指示灯格数（服务端按全服排名算好同步过来）。 */
+    private static Map<String, Integer> adlLights = Map.of();
     /** 下单面板当前选的是限价（否则市价）；只是界面选择。 */
     private static boolean limitMode;
     /** 下单面板当前展开的是止盈止损设置页（否则是预估页）、止盈止损的触发价来源、只减仓开关；都只是界面选择。 */
@@ -69,6 +72,15 @@ public final class ClientTrading {
         funding = List.copyOf(payload.funding());
     }
 
+    static void accept(AdlLightsPayload payload) {
+        adlLights = payload.lights();
+    }
+
+    /** 这个合约仓位的 ADL 指示灯格数（1 到 5）；服务端没给（没有仓位、亏损或持平）就是最低的 1 格。 */
+    public static int adlLights(String symbol) {
+        return adlLights.getOrDefault(symbol, 1);
+    }
+
     static void accept(OrderResultPayload payload) {
         lastResult = new Message(payload.success(),
                 Component.translatable("message.creepercapital.order." + payload.code(), payload.args().toArray()));
@@ -82,6 +94,7 @@ public final class ClientTrading {
         crossSymbols = Set.of();
         orders = List.of();
         funding = List.of();
+        adlLights = Map.of();
         limitMode = false;
         protectionPage = false;
         triggerSource = TriggerSource.LAST;

@@ -15,7 +15,7 @@ import io.github.djp440.creepercapital.core.account.Money;
  * 只存聚合（按事件类型与合约累加次数和金额），明细在各自的历史页里（成交历史、资金费记录、历史委托），所以汇总金额
  * 必须等于对应明细的合计。「玩家当时是否离线」由调用方（服务端）判断，这里只管记录与取走。
  * <p>
- * 加新的离线事件类型（例如 #17 的自动减仓）：在 {@link EventType} 末尾加一个常量，在事件产生处、玩家离线时调
+ * 加新的离线事件类型（#17 的自动减仓是这样接的）：在 {@link EventType} 末尾加一个常量，在事件产生处、玩家离线时调
  * {@link #record}；通知文案按常量名取语言键，不用改汇总本身。
  */
 public final class OfflineSummaries {
@@ -30,7 +30,12 @@ public final class OfflineSummaries {
         /** 限价委托成交：每张成交的委托记一次，金额是成交额（成交价 × 数量，= 历史委托里的委托价与数量之积）。 */
         ORDER_FILL,
         /** 止盈止损触发并成交：每张记一次，金额是已实现盈亏（= 成交历史里平仓那一行）。 */
-        TRIGGER
+        TRIGGER,
+        /**
+         * 自动减仓（#17）：每次缩减记一次，金额是成交额（开仓价 × 缩减数量，= 成交历史里那行自动减仓的价格与数量之积）。
+         * 不记已实现盈亏：自动减仓按开仓价成交，已实现盈亏恒为 0，被放弃的浮盈在通知之外看不出来，所以用成交额对账。
+         */
+        AUTO_DELEVERAGE
     }
 
     /**
@@ -130,6 +135,12 @@ public final class OfflineSummaries {
         for (LiquidationEvent.Liquidated closed : event.positions()) {
             record(event.player(), EventType.LIQUIDATION, closed.symbol(), closed.realizedPnl(), event.marketSeconds());
         }
+    }
+
+    /** 记一次自动减仓，金额是成交额（开仓价 × 缩减数量）。 */
+    public void record(AutoDeleverageEvent event, int quantityDecimals) {
+        record(event.player(), EventType.AUTO_DELEVERAGE, event.symbol(),
+                TradingBook.notional(event.price(), event.lots(), quantityDecimals), event.marketSeconds());
     }
 
     /** 记一次资金费结算，金额是玩家实际收付的带符号金额。 */

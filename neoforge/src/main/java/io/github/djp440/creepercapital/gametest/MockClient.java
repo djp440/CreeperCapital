@@ -7,6 +7,7 @@ import java.util.UUID;
 import com.mojang.authlib.GameProfile;
 
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.LatestTradesPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
@@ -51,7 +52,7 @@ final class MockClient {
         ChannelAttributes.getOrCreateAdHocChannels(connection)
                 .addAll(List.of(MarketSnapshotPayload.TYPE.id(), OpenTradingScreenPayload.TYPE.id(),
                         KlineHistoryPayload.TYPE.id(), AccountPayload.TYPE.id(), TradingStatePayload.TYPE.id(),
-                        OrderResultPayload.TYPE.id(), LatestTradesPayload.TYPE.id()));
+                        OrderResultPayload.TYPE.id(), LatestTradesPayload.TYPE.id(), AdlLightsPayload.TYPE.id()));
         server.getPlayerList().placeNewPlayer(connection, player, cookie);
         return player;
     }

@@ -172,5 +172,11 @@
   "message.creepercapital.offline_summary.funding": "资金费：%1$s 次，净收付 %2$s CRP",
   "message.creepercapital.offline_summary.order_fill": "委托成交：%1$s 笔，成交额 %2$s CRP",
   "message.creepercapital.offline_summary.trigger": "止盈止损触发：%1$s 笔，已实现盈亏合计 %2$s CRP",
-  "message.creepercapital.offline_summary.footer": "明细见对应的历史页：成交历史、资金费记录、历史委托。"
+  "message.creepercapital.offline_summary.auto_deleverage": "自动减仓：%1$s 笔，成交额 %2$s CRP（按开仓价平掉，被减部分的浮盈归零）",
+  "message.creepercapital.offline_summary.footer": "明细见对应的历史页：成交历史、资金费记录、历史委托。",
+  "message.creepercapital.order.open_interest_limit": "该合约的全服持仓总量已接近上限（%s CRP），暂时不能开仓或加仓，平仓不受限",
+  "message.creepercapital.order.auto_deleveraged": "流动性池权益不足，%1$s 被自动减仓 %2$s 个 @ %3$s（开仓价），损失浮盈 %4$s CRP，保证金已退回",
+  "screen.creepercapital.trading.column.adl": "ADL",
+  "screen.creepercapital.trading.trade_side.adl_long": "自动减仓多",
+  "screen.creepercapital.trading.trade_side.adl_short": "自动减仓空"
 }
