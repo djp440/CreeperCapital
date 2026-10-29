@@ -286,7 +286,7 @@ public final class ServerMarket {
                 ModPayloads.sendTo(player, payload);
             }
         }
-        ServerTrading.onMarketStep(server);
+        ServerTrading.onMarketStep(server, snapshots);
     }
 
     private static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
