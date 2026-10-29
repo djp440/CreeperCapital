@@ -1,0 +1,8 @@
+{
+  "key.category.creepercapital.main": "Creeper Capital",
+  "key.creepercapital.open_trading": "Open Trading Screen",
+  "screen.creepercapital.trading.title": "Creeper Capital",
+  "screen.creepercapital.trading.perpetual": "Perpetual",
+  "screen.creepercapital.trading.index_price": "Index Price",
+  "screen.creepercapital.trading.waiting": "Waiting for market data..."
+}

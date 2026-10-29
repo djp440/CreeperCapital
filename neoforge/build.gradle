@@ -1,0 +1,104 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+    id 'idea'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang 在 26.1.2 向玩家分发 Java 25
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+// core 的类与本模组同属一个 mod：开发运行时并入同一个模组，发布时打进同一个 jar
+evaluationDependsOn(':core')
+def coreMain = project(':core').sourceSets.main
+
+dependencies {
+    implementation coreMain.output
+}
+
+// 开发环境调试日志目录：仓库根目录的 logs/
+def devLogDir = rootProject.file('logs').absolutePath
+
+neoForge {
+    version = project.neo_version
+
+    runs {
+        client {
+            client()
+            gameDirectory = project.file('runs/client')
+        }
+
+        server {
+            server()
+            gameDirectory = project.file('runs/server')
+            programArgument '--nogui'
+        }
+
+        // 启动 GameTestServer，跑完本模组的全部 GameTest 后退出
+        gameTestServer {
+            type = 'gameTestServer'
+            gameDirectory = project.file('runs/gametest')
+        }
+
+        configureEach {
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'creepercapital.devLogDir', devLogDir
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+            sourceSet coreMain
+        }
+    }
+}
+
+// 一条命令跑完 core 单元测试与 GameTest：./gradlew check
+tasks.named('check') {
+    dependsOn 'runGameTestServer'
+}
+
+tasks.named('jar', Jar) {
+    from coreMain.output
+}
+
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// 守护进程使用本机编码（见 gradle.properties），资源文件统一按 UTF-8 处理
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+}
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}
