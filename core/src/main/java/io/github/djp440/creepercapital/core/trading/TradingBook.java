@@ -36,10 +36,15 @@ public final class TradingBook {
     /** 每位玩家的成交历史最多保留多少笔（最近的）。 */
     public static final int MAX_TRADES_PER_PLAYER = 200;
 
+    /** maker 手续费率：成交名义价值的 0.02%（限价委托被动成交）。 */
+    public static final double MAKER_FEE_RATE = 0.0002;
+
     private static final BigDecimal TAKER_FEE = BigDecimal.valueOf(TAKER_FEE_RATE);
+    private static final BigDecimal MAKER_FEE = BigDecimal.valueOf(MAKER_FEE_RATE);
 
     private final AccountBook accounts;
     private final LiquidityPool pool;
+    private final OrderBook orders;
     private final Map<UUID, Map<String, Position>> positions = new HashMap<>();
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
     /** 设为全仓的（玩家，合约）；没有记录的是缺省的逐仓。 */
@@ -49,12 +54,19 @@ public final class TradingBook {
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
         this.accounts = accounts;
         this.pool = pool;
+        this.orders = new OrderBook(this, accounts);
     }
 
-    /** 从存档恢复：池子、仓位、成交历史和成交编号接着用，玩家余额仍在传入的账本里。 */
+    /** 限价委托：挂单、撤单与每个行情步的触发。 */
+    public OrderBook orders() {
+        return orders;
+    }
+
+    /** 从存档恢复：池子、仓位、成交历史、委托和编号接着用，玩家余额仍在传入的账本里。 */
     public static TradingBook restore(AccountBook accounts, TradingState state) {
         TradingBook book = new TradingBook(accounts, new LiquidityPool(state.poolBalance()));
         book.lastTradeId = state.lastTradeId();
+        book.orders.restore(state);
         state.positions().forEach((player, owned) -> {
             Map<String, Position> bySymbol = new HashMap<>();
             owned.forEach(position -> bySymbol.put(position.symbol(), position));
@@ -82,7 +94,7 @@ public final class TradingBook {
             }
         });
         return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history),
-                Map.copyOf(savedModes));
+                orders.lastOrderId(), orders.state(), Map.copyOf(savedModes));
     }
 
     /**
@@ -113,7 +125,8 @@ public final class TradingBook {
                 unrealized = unrealized.plus(pnl.compareTo(floor) < 0 ? floor : pnl);
             }
         }
-        Money wallet = free.plus(margins);
+        // 挂单冻结的资金仍属于玩家（钱包余额），但已从空闲余额划走，所以不可用
+        Money wallet = free.plus(margins).plus(orders.frozen(player));
         Money available = crossUnrealized.compareTo(Money.ZERO) < 0 ? free.plus(crossUnrealized) : free;
         if (!available.isPositive()) {
             available = Money.ZERO;
@@ -128,10 +141,11 @@ public final class TradingBook {
 
     /**
      * 这名玩家在这个合约上是否有仓位或委托：有的话不能切换保证金模式。
-     * 目前只有仓位；限价委托（#14）上线后在这里把挂单也算进来，它是「有没有敞口」的唯一判断点。
+     * 它是「有没有敞口」的唯一判断点：仓位或挂着的限价委托都算。
      */
     public boolean hasOpenExposure(UUID player, String symbol) {
-        return position(player, symbol).isPresent();
+        return position(player, symbol).isPresent()
+                || orders.open(player).stream().anyMatch(order -> order.symbol().equals(symbol));
     }
 
     /**
@@ -245,6 +259,19 @@ public final class TradingBook {
      */
     public TradeResult open(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots, int leverage,
             ToDoubleFunction<String> markPrice) {
+        TradeResult invalid = validateOpen(player, spec, side, lots, leverage);
+        if (invalid != null) {
+            return invalid;
+        }
+        double price = fillPrice(spec, snapshot, side, lots);
+        if (!(price > 0)) {
+            return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
+        }
+        return openAt(player, spec, snapshot.time().totalSeconds(), side, lots, leverage, price, TAKER_FEE, markPrice);
+    }
+
+    /** 开仓的前置校验（数量、杠杆、与已有仓位的方向和杠杆）；通过返回 null。市价开仓与限价委托共用。 */
+    TradeResult validateOpen(UUID player, ContractSpec spec, Side side, long lots, int leverage) {
         if (lots <= 0) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
@@ -258,10 +285,22 @@ public final class TradingBook {
         if (existing != null && existing.leverage() != leverage) {
             return TradeResult.reject(TradeResult.Reason.LEVERAGE_MISMATCH, String.valueOf(existing.leverage()));
         }
-        double price = fillPrice(spec, snapshot, side);
-        if (!(price > 0)) {
-            return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
-        }
+        return null;
+    }
+
+    /**
+     * 以给定的成交价和手续费率开仓（调用方已通过 {@link #validateOpen}）：市价是 taker 费率，限价被动成交是 maker 费率。
+     * 限价委托成交走这个重载，拿不到各合约的标记价格，所以其他合约的全仓浮亏按 0 算（可用余额偏乐观，见 pending-cross-checks）。
+     */
+    TradeResult openAt(UUID player, ContractSpec spec, long marketSeconds, Side side, long lots, int leverage,
+            double price, BigDecimal feeRate) {
+        return openAt(player, spec, marketSeconds, side, lots, leverage, price, feeRate, symbol -> Double.NaN);
+    }
+
+    /** 同 {@link #openAt}，可用余额按传入的各合约标记价格算（全仓浮亏占用可用余额）。 */
+    TradeResult openAt(UUID player, ContractSpec spec, long marketSeconds, Side side, long lots, int leverage,
+            double price, BigDecimal feeRate, ToDoubleFunction<String> markPrice) {
+        Position existing = position(player, spec.symbol()).orElse(null);
         Money margin;
         Money fee;
         Money required;
@@ -275,7 +314,7 @@ public final class TradingBook {
                 return TradeResult.reject(TradeResult.Reason.POSITION_LIMIT, limit.toDisplayString());
             }
             margin = Money.ofUnits(ceilDiv(notional.units(), leverage));
-            fee = fee(notional);
+            fee = fee(notional, feeRate);
             required = margin.plus(fee);
             // 所有可能溢出的运算都在动钱之前做完，溢出时整笔不成交、账不变
             updated = existing == null
@@ -299,7 +338,13 @@ public final class TradingBook {
         }
         positions.computeIfAbsent(player, p -> new HashMap<>()).put(spec.symbol(), updated);
         return record(new PlayerTrade(0, player, spec.symbol(), side, TradeKind.OPEN, price, lots, fee, Money.ZERO,
-                snapshot.time().totalSeconds()));
+                marketSeconds));
+    }
+
+    /** 限价委托挂单时要冻结的资金：保证金 + 按 maker 费率预估的手续费（委托价成交时正好是这个数）。 */
+    static Money frozenFor(ContractSpec spec, double price, long lots, int leverage) {
+        Money notional = notional(price, lots, spec.quantityDecimals());
+        return Money.ofUnits(ceilDiv(notional.units(), leverage)).plus(fee(notional, MAKER_FEE));
     }
 
     /**
@@ -318,7 +363,7 @@ public final class TradingBook {
         if (lots > position.lots()) {
             return TradeResult.reject(TradeResult.Reason.CLOSE_EXCEEDS_POSITION, String.valueOf(position.lots()));
         }
-        double price = fillPrice(spec, snapshot, position.side(), TradeKind.CLOSE);
+        double price = fillPrice(spec, snapshot, position.side(), TradeKind.CLOSE, lots);
         if (!(price > 0)) {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
@@ -384,15 +429,25 @@ public final class TradingBook {
                 existing.margin().plus(margin), existing.quantityDecimals(), existing.mode());
     }
 
-    /** 市价成交价：买入（开多、平空）在最新价格上加半个点差，卖出（开空、平多）减半个点差。 */
-    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind) {
+    /**
+     * 市价成交价：<b>全模组唯一的成交价入口</b>。成交价是 {@code lots} 手沿虚拟流动性曲线（{@link io.github.djp440.creepercapital.core.market.LiquidityCurve}）
+     * 逐档吃单的均价：买入（开多、平空）从卖一价（最新价格 + 半个点差）起越吃越贵，卖出（开空、平多）从买一价起越吃越便宜；
+     * 这是临时冲击，不改变最新价格，其他玩家看到的价格不受影响。
+     * <p>
+     * 市价开平仓用它；限价委托中按市价成交（taker）的部分、止盈止损触发后的市价成交也必须调用它，不得另算成交价，
+     * 否则那部分订单会绕过滑点。
+     *
+     * @return 成交均价；数量大到算不出有限的正价格时返回 NaN，调用方按 {@link TradeResult.Reason#INVALID_PRICE} 拒单
+     */
+    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, long lots) {
         boolean buy = (side == Side.LONG) == (kind == TradeKind.OPEN);
-        double half = spec.spread() / 2;
-        return buy ? snapshot.lastPrice() + half : snapshot.lastPrice() - half;
+        double price = spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(buy, lots);
+        return Double.isFinite(price) && price > 0 ? price : Double.NaN;
     }
 
-    private static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side) {
-        return fillPrice(spec, snapshot, side, TradeKind.OPEN);
+    /** 开仓方向的市价成交价（限价委托判断是否穿越、市价开仓共用）。 */
+    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, long lots) {
+        return fillPrice(spec, snapshot, side, TradeKind.OPEN, lots);
     }
 
     /** 名义价值 = 价格 × 数量，取整到最小金额单位。 */
@@ -403,7 +458,11 @@ public final class TradingBook {
 
     /** taker 手续费 = 名义价值 × 0.05%，四舍五入到最小金额单位。 */
     static Money fee(Money notional) {
-        return Money.ofUnits(BigDecimal.valueOf(notional.units()).multiply(TAKER_FEE).setScale(0, RoundingMode.HALF_UP)
+        return fee(notional, TAKER_FEE);
+    }
+
+    static Money fee(Money notional, BigDecimal rate) {
+        return Money.ofUnits(BigDecimal.valueOf(notional.units()).multiply(rate).setScale(0, RoundingMode.HALF_UP)
                 .longValueExact());
     }
 

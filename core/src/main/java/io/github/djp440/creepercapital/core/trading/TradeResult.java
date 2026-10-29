@@ -8,6 +8,10 @@ public sealed interface TradeResult {
     record Filled(PlayerTrade trade) implements TradeResult {
     }
 
+    /** 限价委托已挂出（没有立即成交），资金已冻结。 */
+    record Placed(Order order) implements TradeResult {
+    }
+
     /**
      * 被拒绝，账户和池子都没有变化。
      *
@@ -42,7 +46,9 @@ public sealed interface TradeResult {
         /** 新杠杆超过当前名义价值所在档位的上限；参数：该档位的最高杠杆、当前名义价值（CRP）。 */
         LEVERAGE_ABOVE_TIER,
         /** 调整杠杆后仓位的保证金率会达到 100%（会被强平）；参数：调整后的保证金率（百分比文本）。 */
-        LEVERAGE_UNSAFE
+        LEVERAGE_UNSAFE,
+        /** 挂着的委托已达上限；参数：上限。 */
+        TOO_MANY_ORDERS
     }
 
     static TradeResult reject(Reason reason, String... args) {

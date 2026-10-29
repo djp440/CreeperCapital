@@ -104,9 +104,9 @@ class MarginTiersTest {
         assertEquals(GUNPOWDER, ContractSpec.defaults().get(1).marginTiers());
 
         MarginTiers custom = MarginTiers.of(List.of(new Definition(crp("1000"), 20, 0.01), new Definition(crp("9000"), 5, 0.05)));
-        ContractSpec spec = new ContractSpec("TESTCRP", "minecraft:stone", 10, 1, diamond.volatility(), 0.01, 20, 3, custom);
+        ContractSpec spec = new ContractSpec("TESTCRP", "minecraft:stone", 10, 1, diamond.volatility(), 0.01, 20, 3, ContractSpec.DEFAULT_DEPTH_SLIPPAGE, custom);
         assertEquals(custom, spec.marginTiers());
         assertThrows(IllegalArgumentException.class,
-                () -> new ContractSpec("TESTCRP", "minecraft:stone", 10, 1, diamond.volatility(), 0.01, 25, 3, custom));
+                () -> new ContractSpec("TESTCRP", "minecraft:stone", 10, 1, diamond.volatility(), 0.01, 25, 3, ContractSpec.DEFAULT_DEPTH_SLIPPAGE, custom));
     }
 }

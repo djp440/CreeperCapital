@@ -36,7 +36,9 @@ import net.neoforged.fml.loading.FMLPaths;
  * 合约的服务端配置文件 {@code config/creepercapital-contracts.json}：每个合约的标的资源、起始价格、基础成交量、波动率倾向和交易参数。
  * <p>
  * 点差（{@code spread}，CRP，默认起始价格的 0.05%）、最高杠杆（{@code max_leverage}，默认 20）、数量精度
- * （{@code quantity_decimals}，默认 3 位）和维持保证金分档（{@code maintenance_tiers}，默认按最高杠杆推出五档）四项可以不写，写了就按写的算。
+ * （{@code quantity_decimals}，默认 3 位）、流动性深度（{@code depth_slippage}，名义价值 10,000 CRP 的市价单的平均滑点，
+ * 默认 0.001 即 0.1%，0 表示无限深）和维持保证金分档（{@code maintenance_tiers}，默认按最高杠杆推出五档）五项可以不写，
+ * 写了就按写的算；已存在的配置文件缺这些字段时不会被改写。
  * 分档是数组，每档 {@code up_to}（名义价值上界，CRP）、{@code max_leverage}、{@code maintenance_rate}；
  * 上界递增、杠杆不升、费率不降，第一档的杠杆必须等于 {@code max_leverage}，最后一档的上界就是单个仓位的名义价值上限。
  * <p>
@@ -78,13 +80,16 @@ public final class ContractConfig {
             Codec.DOUBLE.optionalFieldOf("spread").forGetter(spec -> Optional.of(spec.spread())),
             Codec.INT.optionalFieldOf("max_leverage").forGetter(spec -> Optional.of(spec.maxLeverage())),
             Codec.INT.optionalFieldOf("quantity_decimals").forGetter(spec -> Optional.of(spec.quantityDecimals())),
+            Codec.DOUBLE.optionalFieldOf("depth_slippage").forGetter(spec -> Optional.of(spec.depthSlippage())),
             TIER_CODEC.listOf().optionalFieldOf("maintenance_tiers")
                     .forGetter(spec -> Optional.of(spec.marginTiers().definitions())))
-            .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals, tiers) ->
+            .apply(i, (symbol, underlying, initialPrice, baseVolume, volatility, spread, maxLeverage, quantityDecimals,
+                    depthSlippage, tiers) ->
                     new ContractSpec(symbol, underlying, initialPrice, baseVolume, volatility,
                             spread.orElseGet(() -> ContractSpec.defaultSpread(initialPrice)),
                             maxLeverage.orElse(ContractSpec.DEFAULT_MAX_LEVERAGE),
                             quantityDecimals.orElse(ContractSpec.DEFAULT_QUANTITY_DECIMALS),
+                            depthSlippage.orElse(ContractSpec.DEFAULT_DEPTH_SLIPPAGE),
                             tiers.map(MarginTiers::of).orElse(null))));
 
     private ContractConfig() {

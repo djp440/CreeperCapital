@@ -10,6 +10,7 @@ import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.dev.screenshot.ScreenshotStep.View;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.Minecraft;
+import net.neoforged.neoforge.client.network.ClientPacketDistributor;
 
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
@@ -81,7 +82,7 @@ final class ScreenshotScript {
                     View.TRADING,
                     deposit("12345.678901")),
             new ScreenshotStep("11", "下单面板（GUNPOWDERCRP，3 级验收）",
-                    "图表右侧是宽约 168 的下单面板：标题「市价下单」和「逐仓」标签；杠杆一行有 − / + 按钮，当前 20x；"
+                    "图表右侧是宽约 168 的下单面板：顶部「市价」「限价」页签（市价为黄字加下划线）和「逐仓」标签；杠杆一行有 − / + 按钮，当前 20x；"
                             + "数量一栏单位为 GUNPOWDERCRP（数量精度 0 位，整数个），输入框里已填 2；"
                             + "下方预估：可用余额 12,345.678901 CRP、预估成交价（约等于最新价 + 半个点差，开多按买价）、"
                             + "预估保证金 = 名义价值 / 20、预估手续费 = 名义价值 × 0.05%；"
@@ -104,15 +105,54 @@ final class ScreenshotScript {
                             + "每笔手续费 = 名义价值 × 0.05%，开多成交价高于最新价、开空成交价低于最新价；列不重叠、无乱码。",
                     View.TRADES,
                     closeGunpowder()),
-            new ScreenshotStep("14", "全仓仓位（一组全仓、一组逐仓，3 级验收）",
-                    "表格区在「仓位」页；刚把 GUNPOWDERCRP 切为全仓，并以 10x 开多 300 个（名义价值约 3.8 万 CRP），此时 DIAMONDCRP 10x 空 1.500 个仍是逐仓：两行合约列分别写着"
-                            + "「GUNPOWDERCRP 全仓 10x」（绿字）和「DIAMONDCRP 逐仓 10x」（红字）；"
-                            + "每行有预估强平价（黄字）和保证金率（百分比；逐仓行只算该仓位自己的保证金，约 4.0%；全仓行是维持保证金除以全仓钱包，约 5.1%）；"
-                            + "逐仓空头的强平价高于标记价格约 9.5%，全仓多头的强平价约 86.8、远低于标记价格 126（全仓用整个余额扛亏损，所以远得多）；"
-                            + "右侧下单面板（GUNPOWDERCRP）顶部的模式按钮显示「全仓」；列不重叠、无乱码。",
+            new ScreenshotStep("14", "盘口：DIAMONDCRP（3 级验收）",
+                    "图表与下单面板之间是宽约 144 的右侧栏，顶部页签条只有黄字加下划线的「盘口」；表头「价格(CRP) 数量 累计」；"
+                            + "上半部分是卖盘（红字）：离最新价格最近的卖一在最下面，往上价格逐档升高；下半部分是买盘（绿字）：买一在最上面，往下价格逐档降低；"
+                            + "中间一行是最新价格（涨绿跌红或持平白字），卖一 = 最新价 + 0.25（半个点差），买一 = 最新价 − 0.25；"
+                            + "每档数量相同（约 500 CRP 名义价值折成的数量，钻石价格 1000 上下时约 0.46~0.5 个），累计一列逐档递增，背景有按累计数量画的半透明深度条（卖盘红、买盘绿）；"
+                            + "价格逐档拉开的幅度很小（钻石 10,000 CRP 的滑点只有约 0.05%，相邻档价差约 0.05）；"
+                            + "栏内文字不重叠、不越出栏边框，图表被压窄但不与右侧栏重叠。",
+                    View.TRADING,
+                    selectContract("DIAMONDCRP")),
+            new ScreenshotStep("15", "盘口：GUNPOWDERCRP（3 级验收）",
+                    "同 14，但是火药自己的盘口：价格在 100 上下，卖一 = 最新价 + 0.025，买一 = 最新价 − 0.025；"
+                            + "每档数量相同（约 500 CRP 折成的整数个，数量精度 0 位，价格 100 上下时约 4~5 个），累计逐档递增；"
+                            + "火药滑点更大（10,000 CRP 约 0.3%），所以相邻档价差（约 0.03）明显大于钻石盘口里的，"
+                            + "盘口价格范围比钻石更宽；与 14 相比切换合约后盘口立即换成火药的深度，无错位和乱码。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")),
+            new ScreenshotStep("16", "限价下单（GUNPOWDERCRP，3 级验收）",
+                    "下单面板顶部的「限价」页签为黄字加下划线（「市价」为灰字）；杠杆 20x；杠杆行下面多了一个委托价输入框"
+                            + "（右侧单位 CRP），里面已填一个比最新价低约 3% 的价格；其下数量框已填 2（单位 GUNPOWDER）；"
+                            + "预估区只有可用余额、预估保证金（按委托价 × 数量 / 20）、预估手续费（按 maker 0.02%）三行，"
+                            + "没有「预估成交价」；底部仍是绿色「开多」、红色「开空」和「平仓」按钮；"
+                            + "面板内容不越出面板底部，与图表不重叠，无错位和乱码。",
+                    View.LIMIT_ORDER,
+                    leverage("GUNPOWDERCRP", 20)),
+            new ScreenshotStep("17", "当前委托页（3 级验收）",
+                    "表格区的「当前委托」页签为黄字加下划线；表头：时间、合约、方向、类型、委托价、数量、冻结、操作；"
+                            + "两行挂单（最新的在上）：DIAMONDCRP 开空（红字）限价，委托价比最新价高约 10%，数量 1.000，冻结约为 名义价值 / 10 + 0.02% 手续费；"
+                            + "GUNPOWDERCRP 开多（绿字）限价，委托价比最新价低约 10%，数量 10；每行末尾有「撤单」按钮；"
+                            + "资产页可用余额应已减去冻结的资金（下单面板里的可用余额变小）；列不重叠、无乱码。",
+                    View.OPEN_ORDERS,
+                    placeOpenOrders()),
+            new ScreenshotStep("18", "历史委托页（3 级验收）",
+                    "表格区的「历史委托」页签为黄字加下划线；表头：时间、合约、方向、类型、委托价、成交价、数量、手续费、状态；"
+                            + "两行记录（最新的在上）：GUNPOWDERCRP 开多限价 5 个，委托价高于最新价所以下单即成交（状态「已成交」绿字，"
+                            + "成交价约为最新价 + 半个点差，低于委托价，手续费按 taker 0.05%）；"
+                            + "GUNPOWDERCRP 开多限价 10 个，刚被撤单（状态「已撤销」灰字，成交价与手续费显示 \"--\"）；"
+                            + "DIAMONDCRP 的开空挂单仍在「当前委托」页，不出现在这里；列不重叠、无乱码。",
+                    View.ORDER_HISTORY,
+                    fillAndCancelOrders()),
+            new ScreenshotStep("19", "全仓仓位（一组全仓、一组逐仓，3 级验收）",
+                    "表格区在「仓位」页；刚把 GUNPOWDERCRP 的旧仓位平掉、切为全仓，并以 10x 开多 300 个（名义价值约 3.8 万 CRP），此时 DIAMONDCRP 10x 空 1.500 个仍是逐仓："
+                            + "两行合约列分别写着「GUNPOWDERCRP 全仓 10x」（绿字）和「DIAMONDCRP 逐仓 10x」（红字）；"
+                            + "每行有预估强平价（黄字）和保证金率（百分比；逐仓行只算该仓位自己的保证金，约 4%；全仓行是维持保证金除以全仓钱包，约 5%）；"
+                            + "逐仓空头的强平价高于标记价格约 9.5%，全仓多头的强平价约 87、远低于标记价格 126（全仓用整个余额扛亏损，所以远得多）；"
+                            + "右侧下单面板（GUNPOWDERCRP，市价页签）顶部右侧的模式按钮显示「全仓」；列不重叠、无乱码。",
                     View.POSITIONS,
                     openCrossGunpowder()),
-            new ScreenshotStep("15", "杠杆调整（有仓位时调低杠杆，3 级验收）",
+            new ScreenshotStep("20", "杠杆调整（有仓位时调低杠杆，3 级验收）",
                     "刚把 GUNPOWDERCRP 的全仓多头从 10x 调到 5x（点了杠杆 − 一次）：下单面板的杠杆显示 5x，且 − / + 按钮没有被锁定；"
                             + "下单面板结果行是「GUNPOWDERCRP 杠杆已调整为 5x」；仓位页里这一行合约列变为「GUNPOWDERCRP 全仓 5x」，"
                             + "保证金约为调整前的两倍（名义价值 / 5，约 7,575），可用余额相应减少约 3,800；"
@@ -156,18 +196,48 @@ final class ScreenshotScript {
                 .ifPresent(position -> ClientTrading.send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", position.lots()));
     }
 
-    /** 把 GUNPOWDERCRP 设为全仓并以 10x 开多 300 个（名义价值约 3.8 万 CRP，全仓强平价才落在价格之下而不是负数；两个包按发送顺序在服务端处理，所以先切模式再开仓）。 */
+    /**
+     * 把 GUNPOWDERCRP 设为全仓并以 10x 开多 300 个（名义价值约 3.8 万 CRP，全仓强平价才落在价格之下而不是负数）。
+     * 前面的步骤在 GUNPOWDERCRP 上留下了限价成交的仓位，有仓位不能切模式，所以先全平；
+     * 几个包按发送顺序在服务端处理，所以是平仓、切模式、开仓的顺序。
+     */
     private static Consumer<Minecraft> openCrossGunpowder() {
         return minecraft -> {
-            ClientTrading.toggleMarginMode("GUNPOWDERCRP");
+            ClientTrading.setLimitMode(false);
+            ClientTrading.position("GUNPOWDERCRP")
+                    .ifPresent(position -> ClientTrading.send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", position.lots()));
+            // 旧仓位在客户端还没刷新，ClientTrading.leverage() 会读到它的 20x，所以这里直接按 10x 组包
+            ClientPacketDistributor.sendToServer(new OrderPayload(OrderPayload.Action.SET_CROSS, "GUNPOWDERCRP", 0, 10));
+            ClientPacketDistributor.sendToServer(new OrderPayload(OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 300, 10));
             ClientTrading.selectLeverage("GUNPOWDERCRP", 10);
-            ClientTrading.send(OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 300);
         };
     }
 
     /** 有仓位时点一次杠杆 −：10x 调到 5x。 */
     private static Consumer<Minecraft> lowerGunpowderLeverage() {
         return minecraft -> ClientTrading.lowerLeverage("GUNPOWDERCRP");
+    }
+
+    /** 挂两张限价单：DIAMONDCRP 开空（高于市价约 10%）1.000 个，GUNPOWDERCRP 开多（低于市价约 10%）10 个。 */
+    private static Consumer<Minecraft> placeOpenOrders() {
+        return minecraft -> {
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 20);
+            ClientTrading.selectLeverage("DIAMONDCRP", 10);
+            ClientMarket.snapshot("DIAMONDCRP").ifPresent(snapshot -> ClientTrading.sendLimit(
+                    OrderPayload.Action.OPEN_SHORT, "DIAMONDCRP", 1000, snapshot.lastPrice() * 1.1));
+            ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> ClientTrading.sendLimit(
+                    OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 10, snapshot.lastPrice() * 0.9));
+        };
+    }
+
+    /** 撤掉 GUNPOWDERCRP 那张挂单，再下一张高于市价的限价买单让它立即成交，历史委托里就有已撤销和已成交各一条。 */
+    private static Consumer<Minecraft> fillAndCancelOrders() {
+        return minecraft -> {
+            ClientTrading.openOrdersNewestFirst().stream().filter(order -> order.symbol().equals("GUNPOWDERCRP"))
+                    .findFirst().ifPresent(order -> ClientTrading.cancel(order.id()));
+            ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> ClientTrading.sendLimit(
+                    OrderPayload.Action.OPEN_LONG, "GUNPOWDERCRP", 5, snapshot.lastPrice() * 1.5));
+        };
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {

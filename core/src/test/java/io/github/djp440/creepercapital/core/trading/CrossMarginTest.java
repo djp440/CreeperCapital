@@ -26,8 +26,10 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
  * 2.000 个钻石在最新价 1000 开多：成交价 1000.25，名义价值 2000.5，10 倍保证金 200.05，手续费 1.00025。
  */
 class CrossMarginTest {
-    private static final ContractSpec DIAMOND = ContractSpec.defaults().get(0);
-    private static final ContractSpec GUNPOWDER = ContractSpec.defaults().get(1);
+    private static final ContractSpec DEEP_DIAMOND = ContractSpec.defaults().get(0);
+    private static final ContractSpec DEEP_GUNPOWDER = ContractSpec.defaults().get(1);
+    private static final ContractSpec DIAMOND = unlimitedDepth(DEEP_DIAMOND);
+    private static final ContractSpec GUNPOWDER = unlimitedDepth(DEEP_GUNPOWDER);
     private static final UUID ALICE = new UUID(0, 1);
 
     private AccountBook accounts;
@@ -39,6 +41,12 @@ class CrossMarginTest {
         accounts = new AccountBook();
         pool = new LiquidityPool();
         book = new TradingBook(accounts, pool);
+    }
+
+    /** 无限深的变体：成交价恰好是最新价 ± 半个点差，手算值不受滑点影响（滑点本身见 LiquidityCurveTest）。 */
+    private static ContractSpec unlimitedDepth(ContractSpec spec) {
+        return new ContractSpec(spec.symbol(), spec.underlying(), spec.initialPrice(), spec.baseVolume(), spec.volatility(),
+                spec.spread(), spec.maxLeverage(), spec.quantityDecimals(), 0.0);
     }
 
     private static MarketSnapshot snapshot(ContractSpec spec, double last) {
@@ -101,6 +109,23 @@ class CrossMarginTest {
         assertInstanceOf(MarginResult.Applied.class, book.setMarginMode(ALICE, "GUNPOWDERCRP", MarginMode.CROSS));
 
         filled(book.close(ALICE, DIAMOND, snapshot(DIAMOND, 1000), 1000));
+        assertFalse(book.hasOpenExposure(ALICE, "DIAMONDCRP"));
+        assertInstanceOf(MarginResult.Applied.class, book.setMarginMode(ALICE, "DIAMONDCRP", MarginMode.CROSS));
+    }
+
+    @Test
+    @DisplayName("挂着限价委托也算有敞口：不能切换保证金模式，撤单后可以")
+    void pendingLimitOrderAlsoLocksTheMode() {
+        deposit("10000");
+        TradeResult placed = book.orders().placeLimit(ALICE, DIAMOND, snapshot(DIAMOND, 1000), Side.LONG, 1000, 10, 900.0);
+        long orderId = assertInstanceOf(TradeResult.Placed.class, placed).order().id();
+
+        assertTrue(book.hasOpenExposure(ALICE, "DIAMONDCRP"));
+        assertFalse(book.hasOpenExposure(ALICE, "GUNPOWDERCRP"));
+        assertEquals(TradeResult.Reason.MARGIN_MODE_LOCKED,
+                rejected(book.setMarginMode(ALICE, "DIAMONDCRP", MarginMode.CROSS)).reason());
+
+        assertTrue(book.orders().cancel(ALICE, orderId, 100).isPresent());
         assertFalse(book.hasOpenExposure(ALICE, "DIAMONDCRP"));
         assertInstanceOf(MarginResult.Applied.class, book.setMarginMode(ALICE, "DIAMONDCRP", MarginMode.CROSS));
     }
@@ -369,7 +394,7 @@ class CrossMarginTest {
             accounts.deposit(player, Money.parse("5000"));
         }
         Money expected = Money.parse("1015000");
-        ContractSpec[] specs = {DIAMOND, GUNPOWDER};
+        ContractSpec[] specs = {DEEP_DIAMOND, DEEP_GUNPOWDER};
         int crossFills = 0;
         int adjustments = 0;
 
