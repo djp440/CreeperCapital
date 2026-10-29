@@ -113,7 +113,8 @@ public final class MarginTiers {
             Money upTo = Money.ofUnits(BigDecimal.valueOf(DEFAULT_MAX_NOTIONAL.units())
                     .multiply(BigDecimal.valueOf(DEFAULT_BOUND_RATIOS[i])).setScale(0, RoundingMode.HALF_UP).longValueExact());
             int leverage = (int) Math.max(1, Math.round(maxLeverage * DEFAULT_LEVERAGE_RATIOS[i]));
-            double rate = Math.round(0.5 / leverage * 1e6) / 1e6;
+            double unit = Money.UNITS_PER_CRP;
+            double rate = Math.round(0.5 / leverage * unit) / unit;
             definitions.add(new Definition(upTo, leverage, rate));
         }
         return of(definitions);

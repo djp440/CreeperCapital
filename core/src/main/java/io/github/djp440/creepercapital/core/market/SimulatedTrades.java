@@ -32,7 +32,7 @@ public final class SimulatedTrades {
      * @return 按时间顺序排列的成交；成交量折成不到 1 手时为空
      */
     public static List<MarketTrade> of(long marketSeed, ContractSpec spec, MarketSnapshot snapshot, double previousLastPrice) {
-        double scaled = snapshot.volume() * Math.pow(10, spec.quantityDecimals());
+        double scaled = snapshot.volume() * ContractSpec.lotsPerUnit(spec.quantityDecimals());
         if (!(scaled >= 0.5) || scaled > Long.MAX_VALUE / 2) {
             return List.of();
         }

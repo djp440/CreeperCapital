@@ -598,6 +598,24 @@ class TradingBookTest {
     }
 
     @Test
+    @DisplayName("限价预估与挂单冻结同源：名义价值、保证金（向上取整）、maker 手续费都是定点数，不走 double")
+    void limitEstimateMatchesTheFrozenAmount() {
+        // 钻石 1.234 个（精度 3）在 1000.333：名义价值 1234.410922；7 倍保证金 176.344417428… 向上取整 176.344418；
+        // maker 手续费 0.02% × 1234.410922 = 0.2468821844 → 0.246882
+        OpenEstimate estimate = TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1000.333, 1234, 7).orElseThrow();
+
+        assertEquals(1000.333, estimate.price());
+        assertEquals(Money.parse("1234.410922"), estimate.notional());
+        assertEquals(Money.parse("176.344418"), estimate.margin());
+        assertEquals(Money.parse("0.246882"), estimate.fee());
+        assertEquals(estimate.margin().plus(estimate.fee()), TradingBook.frozenFor(DEEP_DIAMOND, 1000.333, 1234, 7));
+        assertEquals(Money.parse("176.5913"), TradingBook.frozenFor(DEEP_DIAMOND, 1000.333, 1234, 7));
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 0, 1234, 7).isEmpty());
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1000, 0, 7).isEmpty());
+        assertTrue(TradingBook.estimateLimit(DEEP_DIAMOND.trading(), 1e300, Long.MAX_VALUE, 7).isEmpty());
+    }
+
+    @Test
     @DisplayName("预估算不出价格（数量大到溢出）时为空，界面显示 --")
     void estimateOfAnAbsurdQuantityIsEmpty() {
         assertTrue(TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.LONG, Long.MAX_VALUE, 10).isEmpty());

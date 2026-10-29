@@ -164,6 +164,8 @@ public final class OfflineSummaries {
                     TradingBook.notional(event.price(), event.lots(), quantityDecimals), event.marketSeconds());
             case TAKE_PROFIT, STOP_LOSS -> record(event.player(), EventType.TRIGGER, event.symbol(),
                     event.realizedPnl(), event.marketSeconds());
+            // 新增委托类型时必须在这里决定它怎么汇总，不能被悄悄吞掉
+            default -> throw new IllegalStateException("离线汇总未处理的委托类型：" + event.type());
         }
         return true;
     }

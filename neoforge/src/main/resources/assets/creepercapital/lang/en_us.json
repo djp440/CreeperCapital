@@ -24,7 +24,7 @@
   "commands.creepercapital.market.jump": "%s will jump %s%% on the next market step",
   "commands.creepercapital.market.jump.unknown": "No such contract: %s",
   "screen.creepercapital.trading.table.assets": "Assets",
-  "screen.creepercapital.trading.assets.wallet": "Wallet Balance",
+  "screen.creepercapital.trading.assets.wallet": "Account Balance",
   "screen.creepercapital.trading.assets.unrealized_pnl": "Unrealized PnL",
   "screen.creepercapital.trading.assets.margin_balance": "Margin Balance",
   "screen.creepercapital.trading.assets.available_balance": "Available Balance",

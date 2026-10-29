@@ -175,8 +175,9 @@ class AutoDeleverageTest {
         assertEquals(1, a.count(OfflineSummaries.EventType.AUTO_DELEVERAGE));
         assertEquals(Money.parse("1000"), a.amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
         PlayerTrade tradeA = book.trades(A).get(0);
-        assertEquals(TradingBook.notional(tradeA.price(), tradeA.lots(), GUNPOWDER.quantityDecimals()),
-                a.amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
+        // 成交历史里那行：开仓价 100 x 10 手（0 位精度），名义价值 1000 就是汇总金额
+        assertEquals(100.0, tradeA.price());
+        assertEquals(10, tradeA.lots());
         assertEquals(Money.parse("1600"), summaries.pending(B).amount(OfflineSummaries.EventType.AUTO_DELEVERAGE));
         assertFalse(summaries.hasPending(C));
     }

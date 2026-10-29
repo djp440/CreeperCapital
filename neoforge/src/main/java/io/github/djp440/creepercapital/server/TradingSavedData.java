@@ -42,10 +42,10 @@ import net.minecraft.world.level.saveddata.SavedDataType;
  */
 public final class TradingSavedData extends SavedData {
     private static final Codec<Money> MONEY = Codec.LONG.xmap(Money::ofUnits, Money::units);
-    private static final Codec<Side> SIDE = Codec.STRING.xmap(Side::valueOf, Side::name);
-    private static final Codec<TradeKind> KIND = Codec.STRING.xmap(TradeKind::valueOf, TradeKind::name);
+    private static final Codec<Side> SIDE = EnumCodecs.of(Side.class);
+    private static final Codec<TradeKind> KIND = EnumCodecs.of(TradeKind.class);
 
-    private static final Codec<MarginMode> MODE = Codec.STRING.xmap(MarginMode::valueOf, MarginMode::name);
+    private static final Codec<MarginMode> MODE = EnumCodecs.of(MarginMode.class);
 
     private record OwnedPosition(UUID player, Position position) {
     }
@@ -93,7 +93,7 @@ public final class TradingSavedData extends SavedData {
     /** 附加条款是 #15 新增的，旧存档的委托没有这些字段，全部缺省为没有。 */
     private static final Codec<OrderExtras> EXTRAS_CODEC = RecordCodecBuilder.create(i -> i.group(
             Codec.BOOL.optionalFieldOf("reduce_only", false).forGetter(OrderExtras::reduceOnly),
-            Codec.STRING.xmap(TriggerSource::valueOf, TriggerSource::name)
+            EnumCodecs.of(TriggerSource.class)
                     .optionalFieldOf("trigger_source", TriggerSource.LAST).forGetter(OrderExtras::triggerSource),
             Codec.DOUBLE.optionalFieldOf("attached_take_profit", 0.0).forGetter(OrderExtras::attachedTakeProfit),
             Codec.DOUBLE.optionalFieldOf("attached_stop_loss", 0.0).forGetter(OrderExtras::attachedStopLoss))
@@ -104,17 +104,17 @@ public final class TradingSavedData extends SavedData {
             UUIDUtil.CODEC.fieldOf("player").forGetter(Order::player),
             Codec.STRING.fieldOf("symbol").forGetter(Order::symbol),
             SIDE.fieldOf("side").forGetter(Order::side),
-            Codec.STRING.xmap(OrderType::valueOf, OrderType::name).fieldOf("type").forGetter(Order::type),
+            EnumCodecs.of(OrderType.class).fieldOf("type").forGetter(Order::type),
             Codec.DOUBLE.fieldOf("price").forGetter(Order::price),
             Codec.LONG.fieldOf("lots").forGetter(Order::lots),
             Codec.INT.fieldOf("leverage").forGetter(Order::leverage),
             MONEY.fieldOf("frozen").forGetter(Order::frozen),
-            Codec.STRING.xmap(OrderStatus::valueOf, OrderStatus::name).fieldOf("status").forGetter(Order::status),
+            EnumCodecs.of(OrderStatus.class).fieldOf("status").forGetter(Order::status),
             Codec.DOUBLE.fieldOf("fill_price").forGetter(Order::fillPrice),
             MONEY.fieldOf("fee").forGetter(Order::fee),
             Codec.LONG.fieldOf("created_seconds").forGetter(Order::createdSeconds),
             Codec.LONG.fieldOf("closed_seconds").forGetter(Order::closedSeconds),
-            Codec.STRING.xmap(CancelReason::valueOf, CancelReason::name).fieldOf("cancel_reason").forGetter(Order::cancelReason),
+            EnumCodecs.of(CancelReason.class).fieldOf("cancel_reason").forGetter(Order::cancelReason),
             EXTRAS_CODEC.optionalFieldOf("extras", OrderExtras.NONE).forGetter(Order::extras))
             .apply(i, Order::new));
 

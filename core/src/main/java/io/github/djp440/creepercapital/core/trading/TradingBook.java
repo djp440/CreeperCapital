@@ -217,7 +217,7 @@ public final class TradingBook {
         }
         MarginTiers tiers = spec.marginTiers();
         double mark = markPrice.applyAsDouble(spec.symbol());
-        double price = Double.isFinite(mark) && mark > 0 ? mark : position.entryPrice();
+        double price = MarginMath.hasMark(mark) ? mark : position.entryPrice();
         Money currentNotional = notional(price, position.lots(), position.quantityDecimals());
         int tierLimit = tiers.maxLeverageAt(currentNotional);
         if (leverage > tierLimit) {
@@ -498,12 +498,12 @@ public final class TradingBook {
         return checkLiquidations(player -> true, markPrice, tiers, marketSeconds);
     }
 
-    /** 同上，但只检查 {@code players} 允许的玩家（GameTest 共用一个活账本，借此把注入的极端价格限定在测试自己的玩家上）。 */
-    public List<LiquidationEvent> checkLiquidations(Predicate<UUID> players0, ToDoubleFunction<String> markPrice,
+    /** 同上，但只检查 {@code allowedPlayers} 允许的玩家（GameTest 共用一个活账本，借此把注入的极端价格限定在测试自己的玩家上）。 */
+    public List<LiquidationEvent> checkLiquidations(Predicate<UUID> allowedPlayers, ToDoubleFunction<String> markPrice,
             Function<String, MarginTiers> tiers, long marketSeconds) {
         List<LiquidationEvent> events = new ArrayList<>();
         List<UUID> players = new ArrayList<>(positions.keySet());
-        players.removeIf(player -> !players0.test(player));
+        players.removeIf(player -> !allowedPlayers.test(player));
         players.sort(Comparator.naturalOrder());
         for (UUID player : players) {
             List<Position> priced = positions(player).stream().filter(p -> hasMark(markPrice, p.symbol()))
@@ -532,8 +532,7 @@ public final class TradingBook {
     }
 
     private static boolean hasMark(ToDoubleFunction<String> markPrice, String symbol) {
-        double mark = markPrice.applyAsDouble(symbol);
-        return Double.isFinite(mark) && mark > 0;
+        return MarginMath.hasMark(markPrice.applyAsDouble(symbol));
     }
 
     private LiquidationEvent liquidate(UUID player, MarginMode mode, List<Position> closing,
@@ -630,16 +629,12 @@ public final class TradingBook {
 
     /** 一个仓位对池子权益的影响（池子欠玩家的）：浮盈为正，浮亏为负且最多到保证金。 */
     private static Money poolLiability(Position position, double mark) {
-        if (!hasMark(mark)) {
+        if (!MarginMath.hasMark(mark)) {
             return Money.ZERO;
         }
         Money pnl = position.pnlAt(mark);
         Money floor = Money.ZERO.minus(position.margin());
         return pnl.compareTo(floor) < 0 ? floor : pnl;
-    }
-
-    private static boolean hasMark(double mark) {
-        return Double.isFinite(mark) && mark > 0;
     }
 
     /** 这个合约全体玩家的未平仓数量（手）之和。 */
@@ -692,7 +687,7 @@ public final class TradingBook {
         List<AdlRanking.Candidate> candidates = new ArrayList<>();
         positions.forEach((player, owned) -> owned.values().forEach(position -> {
             double mark = markPrice.applyAsDouble(position.symbol());
-            if (!hasMark(mark)) {
+            if (!MarginMath.hasMark(mark)) {
                 return;
             }
             Money pnl = position.pnlAt(mark);
@@ -726,11 +721,12 @@ public final class TradingBook {
     public List<AutoDeleverageEvent> checkSolvency(Predicate<UUID> players, ToDoubleFunction<String> markPrice,
             long marketSeconds) {
         List<AutoDeleverageEvent> events = new ArrayList<>();
-        if (poolEquity(markPrice).units() >= 0) {
+        Money equity = poolEquity(markPrice);
+        if (equity.units() >= 0) {
             return events;
         }
         for (AdlRanking.Entry entry : adlRanking(markPrice).entries()) {
-            Money deficit = Money.ZERO.minus(poolEquity(markPrice));
+            Money deficit = Money.ZERO.minus(equity);
             if (!deficit.isPositive()) {
                 break;
             }
@@ -739,7 +735,11 @@ public final class TradingBook {
                 continue;
             }
             double mark = markPrice.applyAsDouble(entry.symbol());
-            events.add(deleverage(entry, position, lotsToCover(position, mark, deficit), mark, marketSeconds));
+            AutoDeleverageEvent event = deleverage(entry, position, lotsToCover(position, mark, deficit), mark,
+                    marketSeconds);
+            events.add(event);
+            // 池子现金不变，权益恰好增加被缩减部分的浮盈；增量维护，不用每个仓位都把全服仓位重算一遍
+            equity = equity.plus(event.lostProfit());
         }
         return events;
     }
@@ -891,7 +891,7 @@ public final class TradingBook {
         return new TradeResult.Filled(numbered);
     }
 
-    /** 订阅玩家成交：成交记录的源头每记下一笔就通知一次（全服「最新成交」广播挂在这里，开仓、平仓、以后的强平与限价成交都会经过）。 */
+    /** 订阅玩家成交：成交记录的源头每记下一笔就通知一次（全服「最新成交」广播挂在这里，开仓、平仓、限价成交、止盈止损、强平与自动减仓都会经过）。 */
     public void addTradeListener(Consumer<PlayerTrade> listener) {
         tradeListeners.add(listener);
     }
@@ -911,7 +911,7 @@ public final class TradingBook {
      * 这是临时冲击，不改变最新价格，其他玩家看到的价格不受影响。
      * <p>
      * 市价开平仓用它；限价委托中按市价成交（taker）的部分、止盈止损触发后的市价成交也必须调用它，不得另算成交价，
-     * 否则那部分订单会绕过滑点。
+     * 否则那部分委托会绕过滑点。
      *
      * @return 成交均价；数量大到算不出有限的正价格时返回 NaN，调用方按 {@link TradeResult.Reason#INVALID_PRICE} 拒单
      */
@@ -944,6 +944,25 @@ public final class TradingBook {
             Money notional = notional(price, lots, params.quantityDecimals());
             return Optional.of(new OpenEstimate(price, notional, Money.ofUnits(ceilDiv(notional.units(), leverage)),
                     fee(notional, TAKER_FEE)));
+        } catch (ArithmeticException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 下单面板的限价预估：按委托价算名义价值、保证金（向上取整）和 maker 手续费，与挂单时服务端冻结的金额（{@link #frozenFor}）
+     * 同源同取整；下单即可成交时服务端改按 taker 收，这里只是提示。
+     *
+     * @return 数量、杠杆、价格不合法或数值溢出时为空
+     */
+    public static Optional<OpenEstimate> estimateLimit(TradingParams params, double price, long lots, int leverage) {
+        if (lots <= 0 || leverage < 1 || !(price > 0) || !Double.isFinite(price)) {
+            return Optional.empty();
+        }
+        try {
+            Money notional = notional(price, lots, params.quantityDecimals());
+            return Optional.of(new OpenEstimate(price, notional, Money.ofUnits(ceilDiv(notional.units(), leverage)),
+                    fee(notional, MAKER_FEE)));
         } catch (ArithmeticException e) {
             return Optional.empty();
         }
