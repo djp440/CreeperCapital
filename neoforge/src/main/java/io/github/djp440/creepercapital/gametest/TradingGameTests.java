@@ -15,6 +15,10 @@ import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderStatus;
+import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -22,6 +26,7 @@ import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradeResult;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
 import io.github.djp440.creepercapital.network.TradingStatePayload;
@@ -70,6 +75,7 @@ final class TradingGameTests {
                 throw new UncheckedIOException(e);
             }
         });
+        LimitOrderGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
@@ -85,13 +91,24 @@ final class TradingGameTests {
         OrderPayload order = new OrderPayload(OrderPayload.Action.OPEN_SHORT, DIAMOND, 2500, 25);
         OrderPayload.STREAM_CODEC.encode(buffer, order);
         helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), order, "下单载荷");
+        OrderPayload limit = new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 1000, 10, OrderPayload.Execution.LIMIT,
+                987.65);
+        OrderPayload.STREAM_CODEC.encode(buffer, limit);
+        helper.assertValueEqual(OrderPayload.STREAM_CODEC.decode(buffer), limit, "限价下单载荷");
+        CancelOrderPayload cancel = new CancelOrderPayload(42);
+        CancelOrderPayload.STREAM_CODEC.encode(buffer, cancel);
+        helper.assertValueEqual(CancelOrderPayload.STREAM_CODEC.decode(buffer), cancel, "撤单载荷");
 
         UUID player = UUID.randomUUID();
         TradingStatePayload state = new TradingStatePayload(
                 List.of(new TradingParams(DIAMOND, 0.5, 125, 3, 0.0005)),
                 List.of(new Position(DIAMOND, Side.SHORT, 2500, 999.75, 25, Money.parse("99.975"), 3)),
                 List.of(new PlayerTrade(7, player, DIAMOND, Side.SHORT, TradeKind.OPEN, 999.75, 2500, Money.parse("1.249687"),
-                        Money.parse("-0.000001"), 86400)));
+                        Money.parse("-0.000001"), 86400)),
+                List.of(new Order(3, player, DIAMOND, Side.LONG, OrderType.LIMIT, 987.65, 1000, 10, Money.parse("98.8"),
+                                OrderStatus.OPEN, 0, Money.ZERO, 86000, 0, CancelReason.NONE),
+                        new Order(4, player, DIAMOND, Side.SHORT, OrderType.LIMIT, 1010, 500, 5, Money.ZERO,
+                                OrderStatus.CANCELLED, 0, Money.ZERO, 86010, 86100, CancelReason.FILL_REJECTED)));
         TradingStatePayload.STREAM_CODEC.encode(buffer, state);
         helper.assertValueEqual(TradingStatePayload.STREAM_CODEC.decode(buffer), state, "交易状态载荷");
 
@@ -101,16 +118,19 @@ final class TradingGameTests {
         helper.succeed();
     }
 
-    private static ServerPlayer trader(GameTestHelper helper, String name, String deposit) {
+    static ServerPlayer trader(GameTestHelper helper, String name, String deposit) {
         ServerPlayer player = MockClient.join(helper, name);
         ServerAccounts.deposit(helper.getLevel().getServer(), player.getUUID(), Money.parse(deposit));
         return player;
     }
 
     /** 清理：平掉仓位、取走余额，让共用的账本不留测试痕迹（资金流向池子与玩家之间，总额不变）。 */
-    private static void finish(ServerPlayer player) {
+    static void finish(ServerPlayer player) {
         MinecraftServer server = player.level().getServer();
         TradingBook book = ServerTrading.book();
+        for (Order order : book.orders().open(player.getUUID())) {
+            book.orders().cancel(player.getUUID(), order.id(), 0);
+        }
         for (Position position : book.positions(player.getUUID())) {
             book.close(player.getUUID(), ServerMarket.spec(position.symbol()), ServerMarket.snapshot(position.symbol()),
                     position.lots());
@@ -122,15 +142,16 @@ final class TradingGameTests {
         MockClient.leave(player);
     }
 
-    private static Money total(UUID player) {
-        Money total = ServerTrading.poolBalance().plus(ServerAccounts.balance(player));
+    static Money total(UUID player) {
+        Money total = ServerTrading.poolBalance().plus(ServerAccounts.balance(player))
+                .plus(ServerTrading.book().orders().frozen(player));
         for (Position position : ServerTrading.book().positions(player)) {
             total = total.plus(position.margin());
         }
         return total;
     }
 
-    private static <T> T last(List<T> list) {
+    static <T> T last(List<T> list) {
         return list.get(list.size() - 1);
     }
 
@@ -144,13 +165,14 @@ final class TradingGameTests {
             Money poolBefore = ServerTrading.poolBalance();
             Money totalBefore = total(id);
 
-            // 0.1 个钻石，名义价值约 100 CRP，在第一档（约 500 CRP）之内，没有滑点
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, 100, 10));
+            // 半档的数量（名义价值约 250 CRP），在第一档之内，没有滑点；档的大小随活市场的价格和配置文件的数量精度变化，所以现算
+            long lots = Math.max(1, spec.liquidityCurve(snapshot.lastPrice()).levelLots() / 2);
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_LONG, DIAMOND, lots, 10));
 
             Position position = ServerTrading.book().position(id, DIAMOND).orElseThrow();
             double expectedFill = snapshot.lastPrice() + spec.spread() / 2;
             helper.assertValueEqual(position.entryPrice(), expectedFill, "多头成交价 = 最新价格 + 半个点差");
-            helper.assertValueEqual(position.lots(), 100L, "仓位数量");
+            helper.assertValueEqual(position.lots(), lots, "仓位数量");
             helper.assertValueEqual(position.leverage(), 10, "杠杆");
             PlayerTrade opened = last(ServerTrading.book().trades(id));
             helper.assertTrue(ServerTrading.poolBalance().equals(poolBefore.plus(opened.fee())), "手续费归流动性池");
@@ -168,7 +190,7 @@ final class TradingGameTests {
             helper.assertValueEqual(account.assets().walletBalance(), ServerAccounts.balance(id).plus(position.margin()),
                     "钱包余额含保证金");
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, 100, 0));
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, DIAMOND, lots, 0));
 
             helper.assertTrue(ServerTrading.book().position(id, DIAMOND).isEmpty(), "全部平仓后没有仓位");
             PlayerTrade closed = last(ServerTrading.book().trades(id));
@@ -192,17 +214,19 @@ final class TradingGameTests {
             MarketSnapshot snapshot = ServerMarket.snapshot(gunpowder);
             Money totalBefore = total(id);
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_SHORT, gunpowder, 40, 20));
+            // 吃 10 档（名义价值约 5,000 CRP）：档的大小随活市场的价格和配置文件的数量精度变化，所以按当前曲线现算手数
+            long lots = spec.liquidityCurve(snapshot.lastPrice()).levelLots() * 10;
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.OPEN_SHORT, gunpowder, lots, 20));
             Position opened = ServerTrading.book().position(id, gunpowder).orElseThrow();
             helper.assertValueEqual(opened.side(), Side.SHORT, "空头");
-            // 40 手约 4,000 CRP，吃掉好几档：均价 = 同一条曲线按 40 手算出的卖出均价，低于买一价
-            helper.assertValueEqual(opened.entryPrice(), spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(false, 40),
+            // 均价 = 同一条曲线按这个数量算出的卖出均价，低于买一价
+            helper.assertValueEqual(opened.entryPrice(), spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(false, lots),
                     "空头成交价 = 沿买盘逐档卖出的均价");
             helper.assertTrue(opened.entryPrice() < snapshot.lastPrice() - spec.spread() / 2, "大单有滑点，比买一价更差");
 
-            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, gunpowder, 15, 0));
+            ServerTrading.handleOrder(player, new OrderPayload(OrderPayload.Action.CLOSE, gunpowder, lots / 4, 0));
             Position remaining = ServerTrading.book().position(id, gunpowder).orElseThrow();
-            helper.assertValueEqual(remaining.lots(), 25L, "部分平仓后剩余数量");
+            helper.assertValueEqual(remaining.lots(), lots - lots / 4, "部分平仓后剩余数量");
             helper.assertValueEqual(remaining.entryPrice(), opened.entryPrice(), "部分平仓不改变开仓均价");
             helper.assertTrue(remaining.margin().compareTo(opened.margin()) < 0, "保证金按比例退回");
             helper.assertValueEqual(total(id), totalBefore, "总额不变");
@@ -221,13 +245,15 @@ final class TradingGameTests {
             ContractSpec spec = ServerMarket.spec(gunpowder);
             MarketSnapshot before = ServerMarket.snapshot(gunpowder);
             double touch = before.lastPrice() + spec.spread() / 2;
-            double expected = spec.liquidityCurve(before.lastPrice()).averageFillPrice(true, 600);
+            // 吃 40 档（名义价值约 20,000 CRP，是参考单的 2 倍）：档的大小随活市场的价格和配置文件的数量精度变化，所以按当前曲线现算手数
+            long lots = spec.liquidityCurve(before.lastPrice()).levelLots() * 40;
+            double expected = spec.liquidityCurve(before.lastPrice()).averageFillPrice(true, lots);
 
-            // 600 个火药，名义价值约 60,000 CRP，是参考单（10,000 CRP）的 6 倍
-            ServerTrading.handleOrder(whale, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, 600, 20));
+            ServerTrading.handleOrder(whale, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, lots, 20));
             Position big = ServerTrading.book().position(whale.getUUID(), gunpowder).orElseThrow();
-            helper.assertValueEqual(big.entryPrice(), expected, "大单成交价 = 曲线按 600 手算出的均价");
-            helper.assertTrue(big.entryPrice() > touch * (1 + 0.003), "大单滑点明显：" + big.entryPrice() + " vs " + touch);
+            helper.assertValueEqual(big.entryPrice(), expected, "大单成交价 = 曲线按这个数量算出的均价");
+            // 名义价值超过参考单，平均滑点至少是合约标定的滑点（曲线单调）
+            helper.assertTrue(big.entryPrice() > touch * (1 + spec.depthSlippage()), "大单滑点明显：" + big.entryPrice() + " vs " + touch);
 
             helper.assertValueEqual(ServerMarket.snapshot(gunpowder).lastPrice(), before.lastPrice(), "成交后最新价格不变");
             ServerTrading.handleOrder(minnow, new OrderPayload(OrderPayload.Action.OPEN_LONG, gunpowder, 1, 5));

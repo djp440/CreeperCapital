@@ -16,6 +16,10 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.github.djp440.creepercapital.CreeperCapital;
 import io.github.djp440.creepercapital.core.account.AccountBook;
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.trading.CancelReason;
+import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderStatus;
+import io.github.djp440.creepercapital.core.trading.OrderType;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -27,7 +31,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
- * 世界存档里的交易账：流动性池余额、玩家的仓位与成交历史，存为 {@code data/creepercapital/trading.dat}。
+ * 世界存档里的交易账：流动性池余额、玩家的仓位、成交历史与委托（挂单和历史委托），存为 {@code data/creepercapital/trading.dat}。
  * 金额以最小单位的整数存储；玩家余额不在这里，在 {@link AccountSavedData}。
  * <p>
  * 读出来只是状态，服务器启动时用 {@link #bind} 接上玩家账本变成活的 {@link TradingBook}，保存时再取它的状态编码。
@@ -68,13 +72,34 @@ public final class TradingSavedData extends SavedData {
             Codec.LONG.fieldOf("market_seconds").forGetter(PlayerTrade::marketSeconds))
             .apply(i, PlayerTrade::new));
 
+    private static final Codec<Order> ORDER_CODEC = RecordCodecBuilder.create(i -> i.group(
+            Codec.LONG.fieldOf("id").forGetter(Order::id),
+            UUIDUtil.CODEC.fieldOf("player").forGetter(Order::player),
+            Codec.STRING.fieldOf("symbol").forGetter(Order::symbol),
+            SIDE.fieldOf("side").forGetter(Order::side),
+            Codec.STRING.xmap(OrderType::valueOf, OrderType::name).fieldOf("type").forGetter(Order::type),
+            Codec.DOUBLE.fieldOf("price").forGetter(Order::price),
+            Codec.LONG.fieldOf("lots").forGetter(Order::lots),
+            Codec.INT.fieldOf("leverage").forGetter(Order::leverage),
+            MONEY.fieldOf("frozen").forGetter(Order::frozen),
+            Codec.STRING.xmap(OrderStatus::valueOf, OrderStatus::name).fieldOf("status").forGetter(Order::status),
+            Codec.DOUBLE.fieldOf("fill_price").forGetter(Order::fillPrice),
+            MONEY.fieldOf("fee").forGetter(Order::fee),
+            Codec.LONG.fieldOf("created_seconds").forGetter(Order::createdSeconds),
+            Codec.LONG.fieldOf("closed_seconds").forGetter(Order::closedSeconds),
+            Codec.STRING.xmap(CancelReason::valueOf, CancelReason::name).fieldOf("cancel_reason").forGetter(Order::cancelReason))
+            .apply(i, Order::new));
+
     private static final Codec<TradingState> STATE_CODEC = RecordCodecBuilder.create(i -> i.group(
             MONEY.fieldOf("pool").forGetter(TradingState::poolBalance),
             Codec.LONG.fieldOf("last_trade_id").forGetter(TradingState::lastTradeId),
             OWNED_POSITION_CODEC.listOf().fieldOf("positions").forGetter(state -> flattenPositions(state)),
-            TRADE_CODEC.listOf().fieldOf("trades").forGetter(state -> flattenTrades(state)))
-            .apply(i, (pool, lastTradeId, positions, trades) -> new TradingState(pool, lastTradeId,
-                    groupPositions(positions), groupTrades(trades))));
+            TRADE_CODEC.listOf().fieldOf("trades").forGetter(state -> flattenTrades(state)),
+            // 委托是 #14 新增的，旧存档没有这两个字段，缺省为没有委托
+            Codec.LONG.optionalFieldOf("last_order_id", 0L).forGetter(TradingState::lastOrderId),
+            ORDER_CODEC.listOf().optionalFieldOf("orders", List.of()).forGetter(state -> flattenOrders(state)))
+            .apply(i, (pool, lastTradeId, positions, trades, lastOrderId, orders) -> new TradingState(pool, lastTradeId,
+                    groupPositions(positions), groupTrades(trades), lastOrderId, groupOrders(orders))));
 
     public static final Codec<TradingSavedData> CODEC = STATE_CODEC.xmap(TradingSavedData::new, TradingSavedData::state);
 
@@ -109,6 +134,21 @@ public final class TradingSavedData extends SavedData {
         state.trades().values().forEach(flat::addAll);
         flat.sort(Comparator.comparingLong(PlayerTrade::id));
         return flat;
+    }
+
+    private static List<Order> flattenOrders(TradingState state) {
+        List<Order> flat = new ArrayList<>();
+        state.orders().values().forEach(flat::addAll);
+        flat.sort(Comparator.comparingLong(Order::id));
+        return flat;
+    }
+
+    private static Map<UUID, List<Order>> groupOrders(List<Order> flat) {
+        Map<UUID, List<Order>> grouped = new LinkedHashMap<>();
+        for (Order order : flat) {
+            grouped.computeIfAbsent(order.player(), p -> new ArrayList<>()).add(order);
+        }
+        return grouped;
     }
 
     private static Map<UUID, List<Position>> groupPositions(List<OwnedPosition> flat) {

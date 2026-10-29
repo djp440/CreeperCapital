@@ -33,10 +33,15 @@ public final class TradingBook {
     /** 每位玩家的成交历史最多保留多少笔（最近的）。 */
     public static final int MAX_TRADES_PER_PLAYER = 200;
 
+    /** maker 手续费率：成交名义价值的 0.02%（限价委托被动成交）。 */
+    public static final double MAKER_FEE_RATE = 0.0002;
+
     private static final BigDecimal TAKER_FEE = BigDecimal.valueOf(TAKER_FEE_RATE);
+    private static final BigDecimal MAKER_FEE = BigDecimal.valueOf(MAKER_FEE_RATE);
 
     private final AccountBook accounts;
     private final LiquidityPool pool;
+    private final OrderBook orders;
     private final Map<UUID, Map<String, Position>> positions = new HashMap<>();
     private final Map<UUID, List<PlayerTrade>> trades = new HashMap<>();
     private long lastTradeId;
@@ -45,12 +50,19 @@ public final class TradingBook {
     public TradingBook(AccountBook accounts, LiquidityPool pool) {
         this.accounts = accounts;
         this.pool = pool;
+        this.orders = new OrderBook(this, accounts);
     }
 
-    /** 从存档恢复：池子、仓位、成交历史和成交编号接着用，玩家余额仍在传入的账本里。 */
+    /** 限价委托：挂单、撤单与每个行情步的触发。 */
+    public OrderBook orders() {
+        return orders;
+    }
+
+    /** 从存档恢复：池子、仓位、成交历史、委托和编号接着用，玩家余额仍在传入的账本里。 */
     public static TradingBook restore(AccountBook accounts, TradingState state) {
         TradingBook book = new TradingBook(accounts, new LiquidityPool(state.poolBalance()));
         book.lastTradeId = state.lastTradeId();
+        book.orders.restore(state);
         state.positions().forEach((player, owned) -> {
             Map<String, Position> bySymbol = new HashMap<>();
             owned.forEach(position -> bySymbol.put(position.symbol(), position));
@@ -70,7 +82,8 @@ public final class TradingBook {
         });
         Map<UUID, List<PlayerTrade>> history = new HashMap<>();
         trades.forEach((player, list) -> history.put(player, List.copyOf(list)));
-        return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history));
+        return new TradingState(pool.balance(), lastTradeId, Map.copyOf(ownedPositions), Map.copyOf(history),
+                orders.lastOrderId(), orders.state());
     }
 
     /**
@@ -91,7 +104,8 @@ public final class TradingBook {
             Money pnl = Double.isFinite(mark) ? position.pnlAt(mark) : Money.ZERO;
             unrealized = unrealized.plus(pnl.compareTo(floor) < 0 ? floor : pnl);
         }
-        Money wallet = free.plus(margins);
+        // 挂单冻结的资金仍属于玩家（钱包余额），只是不可用
+        Money wallet = free.plus(margins).plus(orders.frozen(player));
         return new Assets(wallet, unrealized, wallet.plus(unrealized), free);
     }
 
@@ -120,6 +134,19 @@ public final class TradingBook {
      * @param leverage 杠杆倍数
      */
     public TradeResult open(UUID player, ContractSpec spec, MarketSnapshot snapshot, Side side, long lots, int leverage) {
+        TradeResult invalid = validateOpen(player, spec, side, lots, leverage);
+        if (invalid != null) {
+            return invalid;
+        }
+        double price = fillPrice(spec, snapshot, side, lots);
+        if (!(price > 0)) {
+            return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
+        }
+        return openAt(player, spec, snapshot.time().totalSeconds(), side, lots, leverage, price, TAKER_FEE);
+    }
+
+    /** 开仓的前置校验（数量、杠杆、与已有仓位的方向和杠杆）；通过返回 null。市价开仓与限价委托共用。 */
+    TradeResult validateOpen(UUID player, ContractSpec spec, Side side, long lots, int leverage) {
         if (lots <= 0) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
@@ -133,10 +160,13 @@ public final class TradingBook {
         if (existing != null && existing.leverage() != leverage) {
             return TradeResult.reject(TradeResult.Reason.LEVERAGE_MISMATCH, String.valueOf(existing.leverage()));
         }
-        double price = fillPrice(spec, snapshot, side, lots);
-        if (!(price > 0)) {
-            return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
-        }
+        return null;
+    }
+
+    /** 以给定的成交价和手续费率开仓（调用方已通过 {@link #validateOpen}）：市价是 taker 费率，限价被动成交是 maker 费率。 */
+    TradeResult openAt(UUID player, ContractSpec spec, long marketSeconds, Side side, long lots, int leverage,
+            double price, BigDecimal feeRate) {
+        Position existing = position(player, spec.symbol()).orElse(null);
         Money margin;
         Money fee;
         Money required;
@@ -144,7 +174,7 @@ public final class TradingBook {
         try {
             Money notional = notional(price, lots, spec.quantityDecimals());
             margin = Money.ofUnits(ceilDiv(notional.units(), leverage));
-            fee = fee(notional);
+            fee = fee(notional, feeRate);
             required = margin.plus(fee);
             // 所有可能溢出的运算都在动钱之前做完，溢出时整笔不成交、账不变
             updated = existing == null
@@ -167,7 +197,13 @@ public final class TradingBook {
         }
         positions.computeIfAbsent(player, p -> new HashMap<>()).put(spec.symbol(), updated);
         return record(new PlayerTrade(0, player, spec.symbol(), side, TradeKind.OPEN, price, lots, fee, Money.ZERO,
-                snapshot.time().totalSeconds()));
+                marketSeconds));
+    }
+
+    /** 限价委托挂单时要冻结的资金：保证金 + 按 maker 费率预估的手续费（委托价成交时正好是这个数）。 */
+    static Money frozenFor(ContractSpec spec, double price, long lots, int leverage) {
+        Money notional = notional(price, lots, spec.quantityDecimals());
+        return Money.ofUnits(ceilDiv(notional.units(), leverage)).plus(fee(notional, MAKER_FEE));
     }
 
     /**
@@ -269,7 +305,8 @@ public final class TradingBook {
         return Double.isFinite(price) && price > 0 ? price : Double.NaN;
     }
 
-    private static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, long lots) {
+    /** 开仓方向的市价成交价（限价委托判断是否穿越、市价开仓共用）。 */
+    static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, long lots) {
         return fillPrice(spec, snapshot, side, TradeKind.OPEN, lots);
     }
 
@@ -281,7 +318,11 @@ public final class TradingBook {
 
     /** taker 手续费 = 名义价值 × 0.05%，四舍五入到最小金额单位。 */
     static Money fee(Money notional) {
-        return Money.ofUnits(BigDecimal.valueOf(notional.units()).multiply(TAKER_FEE).setScale(0, RoundingMode.HALF_UP)
+        return fee(notional, TAKER_FEE);
+    }
+
+    static Money fee(Money notional, BigDecimal rate) {
+        return Money.ofUnits(BigDecimal.valueOf(notional.units()).multiply(rate).setScale(0, RoundingMode.HALF_UP)
                 .longValueExact());
     }
 

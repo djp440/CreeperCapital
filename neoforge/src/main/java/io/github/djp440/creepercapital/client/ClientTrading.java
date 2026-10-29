@@ -9,8 +9,11 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.Order;
+import io.github.djp440.creepercapital.core.trading.OrderStatus;
 import io.github.djp440.creepercapital.core.trading.PlayerTrade;
 import io.github.djp440.creepercapital.core.trading.Position;
+import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.OrderPayload;
 import io.github.djp440.creepercapital.network.OrderResultPayload;
 import io.github.djp440.creepercapital.network.TradingStatePayload;
@@ -18,7 +21,7 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.client.network.ClientPacketDistributor;
 
 /**
- * 客户端缓存的本人交易状态（各合约的下单参数、仓位、成交历史）和最近一次下单的结果，只由服务端同步过来的数据更新；离开服务器时清空。
+ * 客户端缓存的本人交易状态（各合约的下单参数、仓位、成交历史、委托）和最近一次下单的结果，只由服务端同步过来的数据更新；离开服务器时清空。
  * 另外记着玩家在下单面板上给每个合约选的杠杆（只是界面选择，下单时由服务端校验）。
  */
 public final class ClientTrading {
@@ -34,6 +37,9 @@ public final class ClientTrading {
     private static final Map<String, Integer> SELECTED_LEVERAGE = new HashMap<>();
     private static List<Position> positions = List.of();
     private static List<PlayerTrade> trades = List.of();
+    private static List<Order> orders = List.of();
+    /** 下单面板当前选的是限价（否则市价）；只是界面选择。 */
+    private static boolean limitMode;
     private static @Nullable Message lastResult;
 
     private ClientTrading() {
@@ -44,6 +50,7 @@ public final class ClientTrading {
         payload.contracts().forEach(params -> PARAMS.put(params.symbol(), params));
         positions = List.copyOf(payload.positions());
         trades = List.copyOf(payload.trades());
+        orders = List.copyOf(payload.orders());
     }
 
     static void accept(OrderResultPayload payload) {
@@ -56,6 +63,8 @@ public final class ClientTrading {
         SELECTED_LEVERAGE.clear();
         positions = List.of();
         trades = List.of();
+        orders = List.of();
+        limitMode = false;
         lastResult = null;
     }
 
@@ -77,6 +86,35 @@ public final class ClientTrading {
         List<PlayerTrade> newestFirst = new ArrayList<>(trades);
         java.util.Collections.reverse(newestFirst);
         return newestFirst;
+    }
+
+    /** 挂着的委托（当前委托），最新的在前。 */
+    public static List<Order> openOrdersNewestFirst() {
+        return newestFirst(OrderStatus.OPEN, true);
+    }
+
+    /** 已成交和已撤销的委托（历史委托），最新的在前。 */
+    public static List<Order> orderHistoryNewestFirst() {
+        return newestFirst(OrderStatus.OPEN, false);
+    }
+
+    private static List<Order> newestFirst(OrderStatus status, boolean matching) {
+        List<Order> selected = new ArrayList<>();
+        for (Order order : orders) {
+            if ((order.status() == status) == matching) {
+                selected.add(order);
+            }
+        }
+        java.util.Collections.reverse(selected);
+        return selected;
+    }
+
+    public static boolean limitMode() {
+        return limitMode;
+    }
+
+    public static void setLimitMode(boolean limit) {
+        limitMode = limit;
     }
 
     public static @Nullable Message lastResult() {
@@ -146,5 +184,16 @@ public final class ClientTrading {
     /** 发出一笔市价委托；结果由服务端回报。 */
     public static void send(OrderPayload.Action action, String symbol, long lots) {
         ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage(symbol)));
+    }
+
+    /** 发出一笔限价开仓委托；结果由服务端回报。 */
+    public static void sendLimit(OrderPayload.Action action, String symbol, long lots, double price) {
+        ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage(symbol),
+                OrderPayload.Execution.LIMIT, price));
+    }
+
+    /** 撤销一张挂单；结果由服务端回报。 */
+    public static void cancel(long orderId) {
+        ClientPacketDistributor.sendToServer(new CancelOrderPayload(orderId));
     }
 }

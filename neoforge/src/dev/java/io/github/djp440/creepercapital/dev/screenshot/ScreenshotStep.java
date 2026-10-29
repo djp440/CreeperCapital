@@ -2,6 +2,7 @@ package io.github.djp440.creepercapital.dev.screenshot;
 
 import java.util.function.Consumer;
 
+import io.github.djp440.creepercapital.client.ClientMarket;
 import io.github.djp440.creepercapital.client.TradingScreen;
 import net.minecraft.client.Minecraft;
 
@@ -33,6 +34,12 @@ public record ScreenshotStep(String id, String title, String expected, View view
         POSITIONS(minecraft -> TradingScreen.openForTrading("POSITIONS", "")),
         /** 交易界面，表格区切到成交历史页。 */
         TRADES(minecraft -> TradingScreen.openForTrading("TRADES", "")),
+        /** 交易界面，下单面板切到限价，委托价填成当前合约最新价的 97%，数量填 2。 */
+        LIMIT_ORDER(minecraft -> TradingScreen.openForLimitOrder("ASSETS", "2", limitPrice())),
+        /** 交易界面，表格区切到当前委托页。 */
+        OPEN_ORDERS(minecraft -> TradingScreen.openForTrading("OPEN_ORDERS", "")),
+        /** 交易界面，表格区切到历史委托页。 */
+        ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", "")),
         /** 交易界面，右侧栏切到「最新成交」页。 */
         LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades());
 
@@ -44,6 +51,11 @@ public record ScreenshotStep(String id, String title, String expected, View view
 
         void open(Minecraft minecraft) {
             opener.accept(minecraft);
+        }
+
+        private static String limitPrice() {
+            return ClientMarket.selectedSymbol().flatMap(ClientMarket::snapshot)
+                    .map(snapshot -> String.format(java.util.Locale.ROOT, "%.2f", snapshot.lastPrice() * 0.97)).orElse("");
         }
     }
 

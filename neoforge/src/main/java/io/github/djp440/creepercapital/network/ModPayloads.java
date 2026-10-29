@@ -43,6 +43,12 @@ public final class ModPayloads {
                                 ServerTrading.handleOrder(player, payload);
                             }
                         })
+                .playToServer(CancelOrderPayload.TYPE, CancelOrderPayload.STREAM_CODEC,
+                        (payload, context) -> {
+                            if (context.player() instanceof ServerPlayer player) {
+                                ServerTrading.handleCancel(player, payload);
+                            }
+                        })
                 .playToServer(KlineRequestPayload.TYPE, KlineRequestPayload.STREAM_CODEC,
                         (payload, context) -> {
                             if (context.player() instanceof ServerPlayer player) {

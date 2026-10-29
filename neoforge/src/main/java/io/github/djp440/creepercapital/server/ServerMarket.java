@@ -288,7 +288,7 @@ public final class ServerMarket {
             }
         }
         ServerLatestTrades.onMarketStep(server, snapshots);
-        ServerTrading.onMarketStep(server);
+        ServerTrading.onMarketStep(server, snapshots);
     }
 
     /** 某个行情步的模拟成交（只展示用，不碰行情的随机数流，见 {@link Market#simulatedTrades}）。 */

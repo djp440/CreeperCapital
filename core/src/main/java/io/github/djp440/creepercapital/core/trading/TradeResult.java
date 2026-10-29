@@ -8,6 +8,10 @@ public sealed interface TradeResult {
     record Filled(PlayerTrade trade) implements TradeResult {
     }
 
+    /** 限价委托已挂出（没有立即成交），资金已冻结。 */
+    record Placed(Order order) implements TradeResult {
+    }
+
     /**
      * 被拒绝，账户和池子都没有变化。
      *
@@ -34,7 +38,9 @@ public sealed interface TradeResult {
         /** 平仓数量超过仓位；参数：仓位数量（手）。 */
         CLOSE_EXCEEDS_POSITION,
         /** 成交价不是正数（价格已低于半个点差）。 */
-        INVALID_PRICE
+        INVALID_PRICE,
+        /** 挂着的委托已达上限；参数：上限。 */
+        TOO_MANY_ORDERS
     }
 
     static TradeResult reject(Reason reason, String... args) {
