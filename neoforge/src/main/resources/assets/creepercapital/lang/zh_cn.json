@@ -157,7 +157,7 @@
   "screen.creepercapital.trading.order_status.liquidated": "已撤销（强平）",
   "screen.creepercapital.trading.trade_side.liquidation_long": "强平多",
   "screen.creepercapital.trading.trade_side.liquidation_short": "强平空",
-  "message.creepercapital.order.liquidated": "%1$s 被强平，损失 %2$s",
+  "message.creepercapital.order.liquidated": "%1$s 被强平",
   "message.creepercapital.order.order_cancelled_liquidated": "挂单随强平撤销 %2$s 个 @ %3$s",
   "message.creepercapital.order.invalid_trigger_input": "止盈止损价格式不对：需要正数",
   "message.creepercapital.order.need_trigger_input": "请至少填写止盈价或止损价",

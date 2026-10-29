@@ -157,7 +157,7 @@
   "screen.creepercapital.trading.order_status.liquidated": "Cancelled (liquidated)",
   "screen.creepercapital.trading.trade_side.liquidation_long": "Liq. Long",
   "screen.creepercapital.trading.trade_side.liquidation_short": "Liq. Short",
-  "message.creepercapital.order.liquidated": "%1$s liquidated, lost %2$s",
+  "message.creepercapital.order.liquidated": "%1$s liquidated",
   "message.creepercapital.order.order_cancelled_liquidated": "Order cancelled by liquidation: %2$s @ %3$s",
   "message.creepercapital.order.invalid_trigger_input": "Invalid TP/SL price: a positive number is required",
   "message.creepercapital.order.need_trigger_input": "Enter a take-profit or stop-loss price",
