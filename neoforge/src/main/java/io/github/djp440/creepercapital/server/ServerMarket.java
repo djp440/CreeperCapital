@@ -117,7 +117,8 @@ public final class ServerMarket {
 
     /** 同一个行情步里，所有在线玩家收到的是同一份快照。 */
     private static void broadcast(MinecraftServer server, MarketSnapshot snapshot) {
-        LOGGER.debug("行情步 {}：{} 指数价格 {}", snapshot.step(), snapshot.symbol(), snapshot.indexPrice());
+        LOGGER.debug("行情步 {}：{} 指数价格 {} 最新价格 {} 标记价格 {} 资金费率 {}", snapshot.step(), snapshot.symbol(),
+                snapshot.indexPrice(), snapshot.lastPrice(), snapshot.markPrice(), snapshot.fundingRate());
         MarketSnapshotPayload payload = new MarketSnapshotPayload(snapshot);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ModPayloads.sendTo(player, payload);

@@ -13,7 +13,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * 交易界面（币安深色主题）。行走骨架阶段只有顶部行情栏，显示 DIAMONDCRP 的指数价格和市场时间。
+ * 交易界面（币安深色主题）。目前只有顶部行情栏：最新价格、标记价格、指数价格、资金费率与结算倒计时、市场时间。
  * <p>
  * 界面每帧读取客户端缓存的行情，服务端每个行情步同步一次，所以价格每个行情步刷新一次。
  */
@@ -25,6 +25,8 @@ public final class TradingScreen extends Screen {
     private static final int LINE_GAP = 3;
 
     private final DecimalFormat priceFormat = new DecimalFormat("#,##0.00", DecimalFormatSymbols.getInstance(Locale.ROOT));
+    /** 资金费率按币安的习惯显示为百分数、保留 4 位小数，例如 0.0100%。 */
+    private final DecimalFormat fundingRateFormat = new DecimalFormat("0.0000%", DecimalFormatSymbols.getInstance(Locale.ROOT));
 
     private TradingScreen() {
         super(Component.translatable("screen.creepercapital.trading.title"));
@@ -73,7 +75,7 @@ public final class TradingScreen extends Screen {
         graphics.horizontalLine(0, width, HEADER_HEIGHT, BinancePalette.DIVIDER);
     }
 
-    /** 顶部行情栏：交易代码 + 指数价格，排版仿币安的「名称在上、数值在下」。 */
+    /** 顶部行情栏：交易代码后依次是各项行情数据，排版仿币安的「名称在上、数值在下」。 */
     private void extractTicker(GuiGraphicsExtractor graphics, MarketSnapshot snapshot) {
         int top = HEADER_HEIGHT + 1;
         int bottom = top + TICKER_HEIGHT;
@@ -88,8 +90,18 @@ public final class TradingScreen extends Screen {
         x += Math.max(font.width(snapshot.symbol()), font.width(perpetual)) + STAT_GAP;
 
         x = extractStat(graphics, x, upperY, lowerY, top, bottom,
+                Component.translatable("screen.creepercapital.trading.last_price"),
+                priceFormat.format(snapshot.lastPrice()), lastPriceColor());
+        x = extractStat(graphics, x, upperY, lowerY, top, bottom,
+                Component.translatable("screen.creepercapital.trading.mark_price"),
+                priceFormat.format(snapshot.markPrice()), BinancePalette.TEXT_PRIMARY);
+        x = extractStat(graphics, x, upperY, lowerY, top, bottom,
                 Component.translatable("screen.creepercapital.trading.index_price"),
-                priceFormat.format(snapshot.indexPrice()), indexPriceColor());
+                priceFormat.format(snapshot.indexPrice()), BinancePalette.TEXT_PRIMARY);
+        x = extractStat(graphics, x, upperY, lowerY, top, bottom,
+                Component.translatable("screen.creepercapital.trading.funding"),
+                fundingRateFormat.format(snapshot.fundingRate()) + " / " + countdownText(snapshot.secondsUntilFunding()),
+                BinancePalette.BRAND_YELLOW);
         extractStat(graphics, x, upperY, lowerY, top, bottom,
                 Component.translatable("screen.creepercapital.trading.market_time"),
                 marketTimeText(snapshot.time()), BinancePalette.TEXT_PRIMARY);
@@ -113,13 +125,18 @@ public final class TradingScreen extends Screen {
                 .getString();
     }
 
+    /** 距结算的倒计时，例如「07:59:54」。 */
+    private static String countdownText(long seconds) {
+        return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    }
+
     private void extractWaiting(GuiGraphicsExtractor graphics) {
         graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.waiting"),
                 width / 2, centeredTextY(HEADER_HEIGHT, height), BinancePalette.TEXT_SECONDARY);
     }
 
-    private static int indexPriceColor() {
-        return switch (ClientMarket.indexPriceDirection()) {
+    private static int lastPriceColor() {
+        return switch (ClientMarket.lastPriceDirection()) {
             case UP -> BinancePalette.UP;
             case DOWN -> BinancePalette.DOWN;
             case FLAT -> BinancePalette.TEXT_PRIMARY;

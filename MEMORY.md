@@ -1,5 +1,12 @@
 # MEMORY
 
+## 2026-10-29 12:00 双层定价的设计取舍（#5）
+
+- 资金费率的 P 用币安时间加权均值 (1·P1+…+n·Pn)/(1+…+n)，状态只存样本数和加权和；标记价格里的「最近一期资金费率」取本期实时预估费率（用户确认）。
+- 结算点那一步的采样归旧期，下一步才清零开新期；倒计时在结算点显示 00:00:00。基差每市场分钟采样、取最近 30 个。
+- 溢价与指数价格共用同一个 `MarketRandom`（存档只多一组定价状态，不多一个随机数状态）；代价是加入溢价后同一种子的指数路径与以前不同，发布前无影响。
+- `MarketSnapshotPayload` 字段变化时要升 `ModPayloads.PROTOCOL_VERSION`，否则新旧端不报版本不匹配而是解码失败。
+
 ## 2026-10-29 11:20 端到端脚本读服务端日志，不解析 stdout
 
 - `runServer` 的 `standardInput = System.in`（`neoforge/build.gradle`）让控制台能收命令；`runServer` 在 DEBUG 下一次启动输出两万行以上，PowerShell `Register-ObjectEvent` 读 stdout 会丢行（曾误报“跳步”，服务端日志证明实际无误）。断言一律读 `logs/` 下服务端自己写的开发日志，stdout 只用 `CopyToAsync` 落盘防止管道写满。

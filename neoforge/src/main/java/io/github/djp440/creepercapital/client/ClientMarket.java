@@ -30,11 +30,11 @@ public final class ClientMarket {
         return Optional.ofNullable(latest);
     }
 
-    /** 指数价格相对上一个行情步的涨跌；还没有上一步时视为持平。 */
-    static PriceDirection indexPriceDirection() {
+    /** 最新价格相对上一个行情步的涨跌；还没有上一步时视为持平。 */
+    static PriceDirection lastPriceDirection() {
         if (latest == null || previous == null) {
             return PriceDirection.FLAT;
         }
-        return PriceDirection.between(previous.indexPrice(), latest.indexPrice());
+        return PriceDirection.between(previous.lastPrice(), latest.lastPrice());
     }
 }

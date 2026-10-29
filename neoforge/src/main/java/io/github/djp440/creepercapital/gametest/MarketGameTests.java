@@ -15,6 +15,7 @@ import java.util.stream.Stream;
 import io.github.djp440.creepercapital.CreeperCapital;
 import io.github.djp440.creepercapital.core.market.Market;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
+import io.github.djp440.creepercapital.core.market.PricingState;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
 import io.github.djp440.creepercapital.server.MarketSavedData;
 import io.github.djp440.creepercapital.server.ServerMarket;
@@ -26,6 +27,8 @@ import net.minecraft.gametest.framework.FunctionGameTestInstance;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.TestData;
 import net.minecraft.gametest.framework.TestEnvironmentDefinition;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -67,6 +70,7 @@ public final class MarketGameTests {
             }
         });
         function("dev_market_command_is_op_only", MarketGameTests::devMarketCommandIsOpOnly);
+        function("pre_pricing_save_loads_with_zero_premium", MarketGameTests::prePricingSaveLoadsWithZeroPremium);
         FUNCTIONS.register(modBus);
         modBus.addListener(MarketGameTests::registerTests);
     }
@@ -120,7 +124,7 @@ public final class MarketGameTests {
 
     /** 行情快照载荷经编码、解码后保持不变。 */
     private static void marketSnapshotPayloadRoundTrips(GameTestHelper helper) {
-        MarketSnapshotPayload payload = new MarketSnapshotPayload(new MarketSnapshot(7L, "DIAMONDCRP", 1012.345678));
+        MarketSnapshotPayload payload = new MarketSnapshotPayload(new MarketSnapshot(7L, "DIAMONDCRP", 1012.345678, 1013.1, 1012.9, -0.00025));
         RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), helper.getLevel().registryAccess());
 
         MarketSnapshotPayload.STREAM_CODEC.encode(buffer, payload);
@@ -151,6 +155,7 @@ public final class MarketGameTests {
             helper.assertTrue(reloaded != null, "存档里应当读得出市场");
             Market restored = reloaded.market();
             helper.assertValueEqual(restored.snapshot(), saved, "重新加载后的市场快照");
+            helper.assertValueEqual(restored.state(), market.state(), "重新加载后的市场状态（含溢价与采样）");
             helper.assertValueEqual(restored.snapshot().time(), saved.time(), "重新加载后的市场时间");
             helper.assertTrue(restored.isPaused(), "暂停状态应随存档保存");
             restored.resume();
@@ -194,6 +199,21 @@ public final class MarketGameTests {
             // 即使断言失败也不能让暂停泄漏给同时运行的其他测试
             ServerMarket.resume();
         }
+        helper.succeed();
+    }
+
+    /** 双层定价之前的存档没有 pricing 字段：照常读出，从零溢价开始。 */
+    private static void prePricingSaveLoadsWithZeroPremium(GameTestHelper helper) {
+        CompoundTag oldSave = new CompoundTag();
+        oldSave.putLong("step", 300L);
+        oldSave.putInt("ticks_into_step", 4);
+        oldSave.putDouble("index_price", 987.5);
+        oldSave.putLong("random_state", 12345L);
+
+        Market market = MarketSavedData.CODEC.parse(NbtOps.INSTANCE, oldSave).getOrThrow().market();
+
+        helper.assertValueEqual(market.state().pricing(), PricingState.INITIAL, "旧存档的定价状态");
+        helper.assertValueEqual(market.snapshot().lastPrice(), 987.5, "零溢价时最新价格等于指数价格");
         helper.succeed();
     }
 
