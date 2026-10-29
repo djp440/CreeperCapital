@@ -378,11 +378,32 @@ public final class TradingBook {
         if (!(price > 0)) {
             return TradeResult.reject(TradeResult.Reason.INVALID_PRICE);
         }
+        return closeAt(player, position, spec, snapshot.time().totalSeconds(), lots, price, TAKER_FEE);
+    }
+
+    /**
+     * 市价只减仓平仓：数量超过仓位时缩减到仓位，没有仓位拒绝（{@link TradeResult.Reason#NO_POSITION}）。
+     * 和 {@link #close} 的差别只在于数量超过仓位不报错。
+     */
+    public TradeResult closeUpTo(UUID player, ContractSpec spec, MarketSnapshot snapshot, long lots) {
+        Position position = position(player, spec.symbol()).orElse(null);
+        if (position == null) {
+            return TradeResult.reject(TradeResult.Reason.NO_POSITION);
+        }
+        return close(player, spec, snapshot, Math.min(lots, position.lots()));
+    }
+
+    /**
+     * 以给定成交价和手续费率结算一次平仓（调用方已校验数量与价格）：市价是 taker 费率，限价平仓被动成交是 maker 费率。
+     * 仓位被平光时，只减仓 / 止盈止损委托随之失效。
+     */
+    TradeResult closeAt(UUID player, Position position, ContractSpec spec, long marketSeconds, long lots, double price,
+            BigDecimal feeRate) {
         Money releasedMargin = lots == position.lots() ? position.margin()
                 : Money.ofUnits(BigDecimal.valueOf(position.margin().units()).multiply(BigDecimal.valueOf(lots))
                         .divide(BigDecimal.valueOf(position.lots()), 0, RoundingMode.FLOOR).longValueExact());
         Money pnl = Position.pnl(position.side(), position.entryPrice(), price, lots, spec.quantityDecimals());
-        Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()));
+        Money tradeFee = fee(notional(price, lots, spec.quantityDecimals()), feeRate);
         // 逐仓：亏损最多亏到这部分仓位的保证金；全仓：亏损最多亏到保证金加账户里的空闲余额（没有强平前余额不会为负）。
         // 盈利由池子付，池子不够就付出它的全部余额
         boolean cross = position.mode() == MarginMode.CROSS;
@@ -410,13 +431,14 @@ public final class TradingBook {
         Map<String, Position> own = positions.get(player);
         if (lots == position.lots()) {
             own.remove(spec.symbol());
+            orders.onPositionClosed(player, spec.symbol(), marketSeconds);
         } else {
             own.put(spec.symbol(), new Position(position.symbol(), position.side(), position.lots() - lots,
                     position.entryPrice(), position.leverage(), position.margin().minus(releasedMargin),
                     position.quantityDecimals(), position.mode()));
         }
         return record(new PlayerTrade(0, player, spec.symbol(), position.side(), TradeKind.CLOSE, price, lots, fee,
-                realized, snapshot.time().totalSeconds()));
+                realized, marketSeconds));
     }
 
     /** 这名玩家最近的资金费记录，按结算先后排列（最旧的在前）。 */
