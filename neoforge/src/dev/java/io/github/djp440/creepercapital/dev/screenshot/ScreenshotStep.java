@@ -42,8 +42,10 @@ public record ScreenshotStep(String id, String title, String expected, View view
         ORDER_HISTORY(minecraft -> TradingScreen.openForTrading("ORDER_HISTORY", "")),
         /** 交易界面，下单面板切到「止盈止损」页，止盈价填最新价的 105%、止损价填 97%，数量填 2，表格区在资产页。 */
         PROTECTION(minecraft -> TradingScreen.openForProtection("ASSETS", "2", protectionPrice(1.05), protectionPrice(0.97))),
-        /** 交易界面，右侧栏切到「最新成交」页。 */
+        /** 交易界面，盘口栏切到「最新成交」页（窄屏时图表卡片切到这一页）。 */
         LATEST_TRADES(minecraft -> TradingScreen.openWithLatestTrades()),
+        /** 交易界面，盘口栏在「盘口」页（窄屏时图表卡片切到这一页）。 */
+        ORDER_BOOK(minecraft -> TradingScreen.openWithOrderBook()),
         /** 交易界面，表格区切到资金费记录页。 */
         FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", ""));
 

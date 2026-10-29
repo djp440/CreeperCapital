@@ -571,6 +571,39 @@ class TradingBookTest {
     }
 
     @Test
+    @DisplayName("下单面板的预估与实际开仓同源：大单的预估均价、保证金、手续费就是成交后的数值")
+    void estimateMatchesTheActualOpen() {
+        deposit("100000");
+
+        // 同 bigOpenFillsAlongTheCurve：买 12 手均价 100.048692，名义价值 1200.584302；
+        // 10 倍保证金向上取整到 1e-6 = 120.058431，手续费 0.600292
+        OpenEstimate estimate = TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.LONG, 12, 10).orElseThrow();
+        PlayerTrade trade = filled(book.open(ALICE, DEEP_GUNPOWDER, snapshot(DEEP_GUNPOWDER, 100, 100), Side.LONG, 12, 10));
+
+        assertEquals(100.048692, estimate.price(), 1e-6);
+        assertEquals(Money.parse("1200.584302"), estimate.notional());
+        assertEquals(Money.parse("120.058431"), estimate.margin());
+        assertEquals(Money.parse("0.600292"), estimate.fee());
+        assertEquals(trade.price(), estimate.price());
+        assertEquals(trade.fee(), estimate.fee());
+        assertEquals(book.position(ALICE, "GUNPOWDERCRP").orElseThrow().margin(), estimate.margin());
+    }
+
+    @Test
+    @DisplayName("预估卖出（开空）沿卖盘向下：12 手火药均价 99.9513，低于买一价 99.975")
+    void estimateOfASellWalksDownTheBids() {
+        OpenEstimate estimate = TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.SHORT, 12, 10).orElseThrow();
+
+        assertEquals(99.9513, estimate.price(), 5e-5);
+    }
+
+    @Test
+    @DisplayName("预估算不出价格（数量大到溢出）时为空，界面显示 --")
+    void estimateOfAnAbsurdQuantityIsEmpty() {
+        assertTrue(TradingBook.estimateOpen(DEEP_GUNPOWDER.trading(), 100, Side.LONG, Long.MAX_VALUE, 10).isEmpty());
+    }
+
+    @Test
     @DisplayName("大到算不出价格的数量被拒绝，而不是成交在无穷大的价格上")
     void absurdQuantityIsRejected() {
         deposit("1000");

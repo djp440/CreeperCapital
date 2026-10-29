@@ -11,6 +11,7 @@ import java.util.List;
 
 import org.slf4j.Logger;
 
+import com.mojang.blaze3d.platform.Window;
 import com.mojang.logging.LogUtils;
 
 import io.github.djp440.creepercapital.client.ClientMarket;
@@ -148,8 +149,11 @@ final class ScreenshotRunner {
 
     private void finish(Minecraft minecraft, boolean success) {
         phase = Phase.DONE;
+        Window window = minecraft.getWindow();
+        String windowInfo = window.getWidth() + "×" + window.getHeight() + "，GUI 缩放 " + window.getGuiScale()
+                + "（界面坐标 " + window.getGuiScaledWidth() + "×" + window.getGuiScaledHeight() + "）";
         try {
-            ScreenshotManifest.write(outputDir, SEED, success, captured);
+            ScreenshotManifest.write(outputDir, SEED, windowInfo, success, captured);
         } catch (IOException e) {
             LOGGER.error("无法写入截图说明", e);
         }

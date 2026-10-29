@@ -266,6 +266,22 @@ class LangFilesTest {
             problems.addAll(checkKey("message.creepercapital.offline_summary." + type, "ServerOfflineSummary(EventType)"));
         }
 
+        // 涨跌色方案（#20）：界面按钮 color_scheme.<ColorScheme>，模组配置界面 creepercapital.configuration.colorScheme.<ColorScheme>
+        String colorScheme = source("neoforge/src/main/java/io/github/djp440/creepercapital/client/ColorScheme.java");
+        List<String> schemes = LangChecks.enumConstants(colorScheme, "ColorScheme");
+        assertTrue(schemes.containsAll(List.of("green_up", "red_up")), "没读到涨跌色方案：" + schemes);
+        for (String scheme : schemes) {
+            problems.addAll(checkKey(TRADING + "color_scheme." + scheme, "ColorScheme.label"));
+            problems.addAll(checkKey("creepercapital.configuration.colorScheme." + scheme, "ColorScheme.getTranslatedName"));
+        }
+        // 模组配置界面（NeoForge ConfigurationScreen）按 <模组 id>.configuration.<配置项> 找标题与说明，按配置文件名找分区标题
+        for (String key : List.of("creepercapital.configuration.title", "creepercapital.configuration.colorScheme",
+                "creepercapital.configuration.colorScheme.tooltip",
+                "creepercapital.configuration.section.creepercapital.client.toml",
+                "creepercapital.configuration.section.creepercapital.client.toml.title")) {
+            problems.addAll(checkKey(key, "ClientConfig（模组配置界面）"));
+        }
+
         assertEquals(List.of(), problems, "动态拼接的键缺失");
     }
 

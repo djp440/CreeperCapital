@@ -20,6 +20,7 @@ import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
+import io.github.djp440.creepercapital.core.market.TradingParams;
 
 /**
  * 全服的交易账：玩家的仓位和成交历史，以及与玩家对赌的流动性池。市价委托以流动性池为对手方（ADR-0001），单向持仓，
@@ -913,9 +914,37 @@ public final class TradingBook {
      * @return 成交均价；数量大到算不出有限的正价格时返回 NaN，调用方按 {@link TradeResult.Reason#INVALID_PRICE} 拒单
      */
     static double fillPrice(ContractSpec spec, MarketSnapshot snapshot, Side side, TradeKind kind, long lots) {
+        return fillPrice(spec.trading(), snapshot.lastPrice(), side, kind, lots);
+    }
+
+    /** 同上，只用下单参数（客户端拿到的就是它）和最新价格；服务端成交与下单面板预估共用这一份。 */
+    private static double fillPrice(TradingParams params, double lastPrice, Side side, TradeKind kind, long lots) {
         boolean buy = (side == Side.LONG) == (kind == TradeKind.OPEN);
-        double price = spec.liquidityCurve(snapshot.lastPrice()).averageFillPrice(buy, lots);
+        double price = params.liquidityCurve(lastPrice).averageFillPrice(buy, lots);
         return Double.isFinite(price) && price > 0 ? price : Double.NaN;
+    }
+
+    /**
+     * 下单面板的市价开仓预估：成交均价、名义价值、保证金、手续费，与 {@link #open} 实际成交用同一个成交价入口和同样的取整，
+     * 所以大单的实际成交不会比预估更好或更差（只要下单时最新价格没变）。不检查余额、仓位上限等，那些由服务端拒单。
+     *
+     * @return 数量非正或价格算不出来时为空
+     */
+    public static Optional<OpenEstimate> estimateOpen(TradingParams params, double lastPrice, Side side, long lots, int leverage) {
+        if (lots <= 0 || leverage < 1 || !(lastPrice > 0) || !Double.isFinite(lastPrice)) {
+            return Optional.empty();
+        }
+        double price = fillPrice(params, lastPrice, side, TradeKind.OPEN, lots);
+        if (!(price > 0)) {
+            return Optional.empty();
+        }
+        try {
+            Money notional = notional(price, lots, params.quantityDecimals());
+            return Optional.of(new OpenEstimate(price, notional, Money.ofUnits(ceilDiv(notional.units(), leverage)),
+                    fee(notional, TAKER_FEE)));
+        } catch (ArithmeticException e) {
+            return Optional.empty();
+        }
     }
 
     /** 开仓方向的市价成交价（限价委托判断是否穿越、市价开仓共用）。 */

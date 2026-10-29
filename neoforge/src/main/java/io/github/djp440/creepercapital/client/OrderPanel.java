@@ -1,14 +1,17 @@
 package io.github.djp440.creepercapital.client;
 
 import java.util.Locale;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
+import io.github.djp440.creepercapital.core.trading.OpenEstimate;
 import io.github.djp440.creepercapital.core.trading.Position;
 import io.github.djp440.creepercapital.core.trading.Quantities;
 import io.github.djp440.creepercapital.core.trading.Side;
@@ -30,20 +33,24 @@ import net.minecraft.util.FormattedCharSequence;
  * 只减仓开着时，「开多」「开空」是买入 / 卖出缩减反向仓位，永远不会开仓。面板高度很紧，所以两页共用同一块区域。
  * <p>
  * 已有仓位时点杠杆的 − / + 是直接调整仓位的杠杆（加仓的杠杆必须和仓位一致），有仓位时不能切换保证金模式；
- * 「平仓」留空数量就是全平。面板上的预估成交价、保证金和手续费只是提示，
- * 实际成交以服务端为准；下单结果（成交或拒单原因）由服务端回报，显示在面板底部。
+ * 「平仓」留空数量就是全平。市价的预估成交均价、保证金和手续费由 {@link TradingBook#estimateOpen} 按实际开仓的同一条
+ * 虚拟流动性曲线算（大单逐档吃单、均价更差），开多、开空各一行均价，保证金与手续费按较高的开多一侧显示；
+ * 限价按委托价估算。下单结果（成交或拒单原因）由服务端回报，显示在按钮下方；面板底部还有空间时显示账户概况。
  */
 final class OrderPanel {
-    static final int WIDTH = 168;
+    /** 只用来给输入框定初始宽度；面板实际宽度由 {@link TradingLayout} 按屏幕算，输入框每帧按它重设宽度。 */
+    private static final int WIDTH = 168;
     private static final int PAD = 8;
     private static final int ROW = 12;
     private static final int BUTTON_HEIGHT = 18;
     private static final int STEP_BUTTON = 14;
     private static final int INPUT_HEIGHT = 16;
-    private static final int BUTTON_BACKGROUND = 0xFF2B3139;
-    private static final int BUTTON_HOVER = 0xFF3C4552;
-    private static final int INPUT_BACKGROUND = 0xFF0B0E11;
-    private static final int DISABLED = 0xFF474D57;
+    private static final int BUTTON_BACKGROUND = BinancePalette.BUTTON;
+    private static final int BUTTON_HOVER = BinancePalette.BUTTON_HOVER;
+    private static final int INPUT_BACKGROUND = BinancePalette.BACKGROUND;
+    private static final int DISABLED = BinancePalette.DISABLED;
+    /** 面板底部的账户概况：标题加三行（钱包余额、未实现盈亏、保证金余额）。 */
+    private static final int ACCOUNT_HEIGHT = ROW * 4 + 4;
 
     private final Font font;
     private final EditBox quantityBox;
@@ -140,7 +147,6 @@ final class OrderPanel {
     void extract(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom, String symbol, @Nullable MarketSnapshot snapshot,
             int mouseX, int mouseY, float partialTick) {
         graphics.fill(left, top, right, bottom, BinancePalette.PANEL);
-        graphics.outline(left, top, right - left, bottom - top, BinancePalette.DIVIDER);
         TradingParams params = ClientTrading.params(symbol).orElse(null);
         Position position = ClientTrading.position(symbol).orElse(null);
         int x = left + PAD;
@@ -236,8 +242,8 @@ final class OrderPanel {
                     Component.translatable(position.side() == Side.LONG
                             ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
                     Quantities.format(position.lots(), position.quantityDecimals()), position.leverage());
-            graphics.text(font, held, right - PAD - font.width(held), y,
-                    position.side() == Side.LONG ? BinancePalette.UP : BinancePalette.DOWN, false);
+            String text = GuiText.fit(font, held.getString(), right - PAD - protectionTab[2] - 4);
+            graphics.text(font, text, right - PAD - font.width(text), y, BinancePalette.side(position.side() == Side.LONG), false);
         }
         y += ROW + 3;
         OptionalLong lots = params == null ? OptionalLong.empty() : Quantities.parseLots(quantityBox.getValue(), params.quantityDecimals());
@@ -253,8 +259,7 @@ final class OrderPanel {
                     Component.translatable(position.side() == Side.LONG
                             ? "screen.creepercapital.trading.side.long" : "screen.creepercapital.trading.side.short"),
                     Quantities.format(position.lots(), position.quantityDecimals()), position.leverage());
-            graphics.text(font, held, x, y, position.side() == Side.LONG
-                    ? BinancePalette.UP : BinancePalette.DOWN, false);
+            graphics.text(font, GuiText.fit(font, held.getString(), width), x, y, BinancePalette.side(position.side() == Side.LONG), false);
             y += ROW - 1;
         }
         y += 1;
@@ -264,8 +269,8 @@ final class OrderPanel {
         int half = (width - gap) / 2;
         buyBox = new int[] {x, y, x + half, y + BUTTON_HEIGHT};
         sellBox = new int[] {x + half + gap, y, x + width, y + BUTTON_HEIGHT};
-        colorButton(graphics, buyBox, Component.translatable("screen.creepercapital.trading.order.buy"), BinancePalette.UP, mouseX, mouseY);
-        colorButton(graphics, sellBox, Component.translatable("screen.creepercapital.trading.order.sell"), BinancePalette.DOWN, mouseX, mouseY);
+        colorButton(graphics, buyBox, Component.translatable("screen.creepercapital.trading.order.buy"), BinancePalette.up(), mouseX, mouseY);
+        colorButton(graphics, sellBox, Component.translatable("screen.creepercapital.trading.order.sell"), BinancePalette.down(), mouseX, mouseY);
         y += BUTTON_HEIGHT + 4;
         boolean canClose = position != null;
         // 有仓位时，平仓行分成「平仓」和「设止盈止损」两个按钮
@@ -281,13 +286,21 @@ final class OrderPanel {
         }
         y += BUTTON_HEIGHT + 2;
 
-        // 下单结果
+        // 账户概况：面板底部放得下（按钮下方至少还留两行下单结果）时才画
+        int accountTop = bottom - 6 - ACCOUNT_HEIGHT;
+        boolean account = accountTop >= y + (font.lineHeight + 1) * 2 + 4;
+        if (account) {
+            extractAccount(graphics, x, right - PAD, accountTop);
+        }
+
+        // 下单结果：成功是主文字色（只是告知），失败是错误红（与涨跌色方案无关）
         ClientTrading.Message message = ClientTrading.lastResult();
         if (message != null) {
-            int color = message.success() ? BinancePalette.UP : BinancePalette.DOWN;
-            // 只画面板放得下的行，免得长消息越出面板底部
+            int color = message.success() ? BinancePalette.TEXT_PRIMARY : BinancePalette.ERROR;
+            int limitY = account ? accountTop - 4 : bottom - 3;
+            // 只画面板放得下的行，免得长消息越出面板底部或压到账户概况
             for (FormattedCharSequence line : font.split(message.text(), width)) {
-                if (y + font.lineHeight > bottom - 3) {
+                if (y + font.lineHeight > limitY) {
                     break;
                 }
                 graphics.text(font, line, x, y, color, false);
@@ -296,30 +309,68 @@ final class OrderPanel {
         }
     }
 
-    /** 可用余额与预估成交价、保证金、手续费，每项一行：名称在左、数值在右。 */
+    /** 账户概况：分隔线、标题，然后钱包余额、未实现盈亏（按正负着涨跌色）、保证金余额。 */
+    private void extractAccount(GuiGraphicsExtractor graphics, int x, int right, int top) {
+        graphics.horizontalLine(x, right - 1, top, BinancePalette.DIVIDER);
+        int y = top + 5;
+        graphics.text(font, Component.translatable("screen.creepercapital.trading.order.account"), x, y, BinancePalette.TEXT_PRIMARY, false);
+        y += ROW;
+        Assets assets = ClientAccount.assets();
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.wallet",
+                MarketFormat.money(assets.walletBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
+        y += ROW - 1;
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.unrealized_pnl",
+                MarketFormat.signedMoney(assets.unrealizedPnl()) + " CRP", BinancePalette.signed(assets.unrealizedPnl().units()));
+        y += ROW - 1;
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.assets.margin_balance",
+                MarketFormat.money(assets.marginBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
+    }
+
+    /**
+     * 可用余额与预估值，每项一行：名称在左、数值在右。
+     * 市价：开多、开空的成交均价各一行（沿虚拟流动性曲线逐档吃单，与实际开仓同源），保证金和手续费按开多一侧（两边中较高的）；
+     * 限价：按委托价估算，手续费按挂单（maker）算，下单即可成交时服务端按 taker 收，这里只是提示。
+     */
     private int extractInfo(GuiGraphicsExtractor graphics, int x, int right, int y, @Nullable TradingParams params,
             @Nullable MarketSnapshot snapshot, OptionalLong lots, int leverage, OptionalDouble limitPrice, boolean limit) {
         infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.available",
-                ClientAccount.assets().availableBalance().toDisplayString() + " CRP");
+                MarketFormat.money(ClientAccount.assets().availableBalance()) + " CRP", BinancePalette.TEXT_PRIMARY);
         y += ROW - 1;
-        if (!limit) {
-            String price = snapshot == null || params == null ? "--" : MarketFormat.price(snapshot.lastPrice());
-            infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.price", price);
-            y += ROW - 1;
-        }
         String margin = "--";
         String fee = "--";
-        // 限价：按委托价估算；手续费按挂单（maker）算，下单即可成交时服务端按 taker 收，这里只是提示
-        double basis = limit ? limitPrice.orElse(Double.NaN) : snapshot == null ? Double.NaN : snapshot.lastPrice();
-        if (snapshot != null && params != null && lots.isPresent() && basis > 0) {
-            double notional = basis * lots.getAsLong() / Math.pow(10, params.quantityDecimals());
-            margin = MarketFormat.price(notional / leverage) + " CRP";
-            fee = MarketFormat.price(notional * (limit ? TradingBook.MAKER_FEE_RATE : TradingBook.TAKER_FEE_RATE)) + " CRP";
+        if (limit) {
+            double price = limitPrice.orElse(Double.NaN);
+            if (params != null && lots.isPresent() && price > 0) {
+                double notional = price * lots.getAsLong() / Math.pow(10, params.quantityDecimals());
+                margin = MarketFormat.price(notional / leverage) + " CRP";
+                fee = MarketFormat.price(notional * TradingBook.MAKER_FEE_RATE) + " CRP";
+            }
+        } else {
+            Optional<OpenEstimate> buy = estimate(params, snapshot, Side.LONG, lots, leverage);
+            Optional<OpenEstimate> sell = estimate(params, snapshot, Side.SHORT, lots, leverage);
+            infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.price_long",
+                    buy.map(estimate -> MarketFormat.price(estimate.price())).orElse("--"),
+                    buy.isPresent() ? BinancePalette.up() : BinancePalette.TEXT_PRIMARY);
+            y += ROW - 1;
+            infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.price_short",
+                    sell.map(estimate -> MarketFormat.price(estimate.price())).orElse("--"),
+                    sell.isPresent() ? BinancePalette.down() : BinancePalette.TEXT_PRIMARY);
+            y += ROW - 1;
+            margin = buy.map(estimate -> MarketFormat.money(estimate.margin()) + " CRP").orElse("--");
+            fee = buy.map(estimate -> MarketFormat.fee(estimate.fee()) + " CRP").orElse("--");
         }
-        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.margin", margin);
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.margin", margin, BinancePalette.TEXT_PRIMARY);
         y += ROW - 1;
-        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.fee", fee);
+        infoRow(graphics, x, right, y, "screen.creepercapital.trading.order.fee", fee, BinancePalette.TEXT_PRIMARY);
         return y + ROW - 1;
+    }
+
+    private static Optional<OpenEstimate> estimate(@Nullable TradingParams params, @Nullable MarketSnapshot snapshot, Side side,
+            OptionalLong lots, int leverage) {
+        if (params == null || snapshot == null || lots.isEmpty()) {
+            return Optional.empty();
+        }
+        return TradingBook.estimateOpen(params, snapshot.lastPrice(), side, lots.getAsLong(), leverage);
     }
 
     /** 止盈止损页：止盈价、止损价并排两个输入框；其下是触发价来源开关和只减仓开关。 */
@@ -373,9 +424,12 @@ final class OrderPanel {
                 enabled ? BinancePalette.TEXT_PRIMARY : DISABLED);
     }
 
-    private void infoRow(GuiGraphicsExtractor graphics, int x, int right, int y, String labelKey, String value) {
-        graphics.text(font, Component.translatable(labelKey), x, y, BinancePalette.TEXT_SECONDARY, false);
-        graphics.text(font, value, right - font.width(value), y, BinancePalette.TEXT_PRIMARY, false);
+    /** 一行「名称 ……… 数值」：数值靠右完整显示，名称放不下时截断。 */
+    private void infoRow(GuiGraphicsExtractor graphics, int x, int right, int y, String labelKey, String value, int valueColor) {
+        int valueWidth = font.width(value);
+        String label = GuiText.fit(font, Component.translatable(labelKey).getString(), right - x - valueWidth - 4);
+        graphics.text(font, label, x, y, BinancePalette.TEXT_SECONDARY, false);
+        graphics.text(font, value, right - valueWidth, y, valueColor, false);
     }
 
     /** 市价 / 限价页签：当前页黄字加下划线，鼠标悬停的底色变亮。 */

@@ -16,7 +16,11 @@ import io.github.djp440.creepercapital.network.TradingStatePayload;
 import net.minecraft.client.KeyMapping;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.neoforge.client.gui.ConfigurationScreen;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -25,7 +29,7 @@ import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import net.neoforged.neoforge.common.NeoForge;
 
 /**
- * 客户端入口：快捷键、载荷处理器与交易界面。专用服务端不会加载这个类。
+ * 客户端入口：快捷键、载荷处理器、客户端配置（涨跌色方案，模组列表里可打开配置界面）与交易界面。专用服务端不会加载这个类。
  */
 @Mod(value = CreeperCapital.MOD_ID, dist = Dist.CLIENT)
 public final class CreeperCapitalClient {
@@ -36,7 +40,9 @@ public final class CreeperCapitalClient {
             "key.creepercapital.open_trading", KeyConflictContext.IN_GAME,
             InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, KEY_CATEGORY);
 
-    public CreeperCapitalClient(IEventBus modBus) {
+    public CreeperCapitalClient(IEventBus modBus, ModContainer container) {
+        container.registerConfig(ModConfig.Type.CLIENT, ClientConfig.SPEC);
+        container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         modBus.addListener(CreeperCapitalClient::onRegisterKeyMappings);
         modBus.addListener(CreeperCapitalClient::onRegisterPayloadHandlers);
         NeoForge.EVENT_BUS.addListener(CreeperCapitalClient::onClientTick);
