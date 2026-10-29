@@ -10,6 +10,7 @@ NeoForge 26.1.2 模组（Java 25）。两个 Gradle 子项目合成同一个 mod
 - `./gradlew check`：一条命令跑完 core 单元测试和全部 GameTest。
 - `./gradlew :neoforge:runClient` 和 `./gradlew :neoforge:runServer` 启动开发客户端和专用服务端（开发环境跳过 EULA 检查）。
 - `./gradlew :neoforge:runScreenshots`：无人值守自动截图验收，产物在仓库根目录 `screenshots/<时间>/`（编号 PNG + `README.md` 说明）。新增界面的验收截图，在 `neoforge/src/dev/.../ScreenshotScript.java` 追加步骤；该代码在 `dev` 源集，不进发布 jar。
+- `pwsh -NoProfile -File scripts/restart-e2e.ps1`：端到端重启测试，真实启停专用服务端三次，验证市场存档恢复、暂停保持、不补算（约 2 分钟，不在 `check` 里）。
 - 开发运行的 DEBUG 日志写在仓库根目录 `logs/yyyy-MM-dd HH-mm-ss.log`，每次启动一个文件。
 
 ## Agent skills

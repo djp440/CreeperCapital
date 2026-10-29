@@ -93,6 +93,9 @@ def prepareScreenshotRun = tasks.register('prepareScreenshotRun') {
 }
 tasks.matching { it.name == 'runScreenshots' }.configureEach { dependsOn prepareScreenshotRun }
 
+// 专用服务端的控制台转发 Gradle 的标准输入：可以直接输入 stop、creeper dev ... 等命令，端到端重启测试也靠它驱动
+tasks.matching { it.name == 'runServer' }.configureEach { standardInput = System.in }
+
 // 一条命令跑完 core 单元测试与 GameTest：./gradlew check
 tasks.named('check') {
     dependsOn 'runGameTestServer'

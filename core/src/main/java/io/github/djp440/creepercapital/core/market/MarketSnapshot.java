@@ -8,4 +8,9 @@ package io.github.djp440.creepercapital.core.market;
  * @param indexPrice 该合约的指数价格（CRP）
  */
 public record MarketSnapshot(long step, String symbol, double indexPrice) {
+
+    /** 此刻的市场时间：每个行情步 6 市场秒。 */
+    public MarketTime time() {
+        return MarketTime.ofStep(step);
+    }
 }

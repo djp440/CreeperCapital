@@ -5,11 +5,12 @@ import com.mojang.brigadier.Command;
 import io.github.djp440.creepercapital.network.ModPayloads;
 import io.github.djp440.creepercapital.network.OpenTradingScreenPayload;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 /**
- * {@code /creeper}：为执行命令的玩家打开交易界面。
+ * {@code /creeper}：为执行命令的玩家打开交易界面；{@code /creeper dev ...} 是仅限 OP 的开发命令。
  */
 public final class CreeperCommand {
     private CreeperCommand() {
@@ -24,6 +25,21 @@ public final class CreeperCommand {
                 .executes(context -> {
                     ModPayloads.sendTo(context.getSource().getPlayerOrException(), OpenTradingScreenPayload.INSTANCE);
                     return Command.SINGLE_SUCCESS;
-                }));
+                })
+                .then(Commands.literal("dev")
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.literal("market")
+                                .then(Commands.literal("pause").executes(context -> {
+                                    ServerMarket.pause();
+                                    context.getSource().sendSuccess(
+                                            () -> Component.translatable("commands.creepercapital.market.paused"), true);
+                                    return Command.SINGLE_SUCCESS;
+                                }))
+                                .then(Commands.literal("resume").executes(context -> {
+                                    ServerMarket.resume();
+                                    context.getSource().sendSuccess(
+                                            () -> Component.translatable("commands.creepercapital.market.resumed"), true);
+                                    return Command.SINGLE_SUCCESS;
+                                })))));
     }
 }

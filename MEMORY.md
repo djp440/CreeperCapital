@@ -1,5 +1,18 @@
 # MEMORY
 
+## 2026-10-29 11:20 端到端脚本读服务端日志，不解析 stdout
+
+- `runServer` 的 `standardInput = System.in`（`neoforge/build.gradle`）让控制台能收命令；`runServer` 在 DEBUG 下一次启动输出两万行以上，PowerShell `Register-ObjectEvent` 读 stdout 会丢行（曾误报“跳步”，服务端日志证明实际无误）。断言一律读 `logs/` 下服务端自己写的开发日志，stdout 只用 `CopyToAsync` 落盘防止管道写满。
+- 专用服务端空服 60 秒会自动暂停（`pause-when-empty-seconds`），市场随之冻结；e2e 流程都在 60 秒内完成。
+
+## 2026-10-29 10:30 市场持久化的设计取舍（#4）
+
+- 行情随机数用自研 `MarketRandom`（SplitMix64，状态只有一个 long），不用 `java.util.Random`：后者内部状态取不出来，无法随存档保存。Box-Muller 每次消耗两个均匀数、不缓存多余的一个，保证状态完整。
+- `MarketSavedData` 持有活的 `Market`，保存时才取 `state()` 编码；`ServerMarket` 用 `storage.get/set` 显式创建（按世界种子），`SavedDataType` 的工厂故意抛异常，别改成 `computeIfAbsent`。
+- 暂停状态（`MarketState.paused`）随存档保存，codec 用 `optionalFieldOf("paused", false)` 兼容旧存档；暂停时每 tick 不再标脏，所以 `pause()/resume()` 必须主动 `setDirty`，否则暂停切换不会落盘。单人游戏暂停时 `IntegratedServer.tickServer` 不调用 `super.tickServer`，不会发 `ServerTickEvent`，市场天然冻结。
+- 持久化有两层测试：GameTest 用独立临时 `SavedDataStorage` 做真实文件读写；`scripts/restart-e2e.ps1` 真实启停专用服务端三次（暂停重启、恢复后不补算、运行中停服离线后重启不补算）。
+- 测试 dev 命令时用 `server.createCommandSourceStack().withPermission(PermissionSet.NO_PERMISSIONS)` 模拟普通玩家；暂停必须在同一 tick 内恢复，避免干扰并行的其他 GameTest。
+
 ## 2026-10-29 09:47 中文 Windows + 非 ASCII 路径的编码链路
 
 - 仓库位于 `E:\文档\...`。Gradle 按守护进程默认编码写测试 worker 的 @argfile，java 启动器却按本机编码（GBK）读取，classpath 读成乱码，表现为 `ClassNotFoundException`。对策：`gradle.properties` 的 `org.gradle.jvmargs` 加 `-Dfile.encoding=COMPAT`。
