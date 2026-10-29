@@ -166,5 +166,11 @@
   "message.creepercapital.order.take_profit_filled": "止盈触发，已平仓 %1$s %2$s 个 @ %3$s，盈亏 %5$s",
   "message.creepercapital.order.stop_loss_filled": "止损触发，已平仓 %1$s %2$s 个 @ %3$s，盈亏 %5$s",
   "commands.creepercapital.pool.funded": "已给流动性池注资 %s CRP，池子余额 %s CRP",
-  "commands.creepercapital.pool.overflow": "池子余额将超出上限"
+  "commands.creepercapital.pool.overflow": "池子余额将超出上限",
+  "message.creepercapital.offline_summary.header": "你离线期间合约账户发生了这些事件：",
+  "message.creepercapital.offline_summary.liquidation": "强平：%1$s 个仓位，已实现盈亏合计 %2$s CRP",
+  "message.creepercapital.offline_summary.funding": "资金费：%1$s 次，净收付 %2$s CRP",
+  "message.creepercapital.offline_summary.order_fill": "委托成交：%1$s 笔，成交额 %2$s CRP",
+  "message.creepercapital.offline_summary.trigger": "止盈止损触发：%1$s 笔，已实现盈亏合计 %2$s CRP",
+  "message.creepercapital.offline_summary.footer": "明细见对应的历史页：成交历史、资金费记录、历史委托。"
 }
