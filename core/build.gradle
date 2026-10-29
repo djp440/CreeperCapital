@@ -1,0 +1,29 @@
+plugins {
+    id 'java-library'
+}
+
+// 核心不依赖 Minecraft 与加载器，按 Java 17 编译，便于将来迁移到 Forge 1.20.1（ADR-0004）
+group = mod_group_id
+version = mod_version
+
+repositories {
+    mavenCentral()
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    defaultCharacterEncoding = 'UTF-8'
+}

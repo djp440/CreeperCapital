@@ -1,0 +1,27 @@
+license="${mod_license}"
+issueTrackerURL="https://github.com/djp440/CreeperCapital/issues"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+displayURL="https://github.com/djp440/CreeperCapital"
+authors="djp440"
+description='''
+苦力怕资本：在 Minecraft 里交易以原版资源为标的的永续合约。
+Creeper Capital: trade perpetual futures on vanilla resources in Minecraft.
+'''
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="[${neo_version},)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"

@@ -1,0 +1,14 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'creepercapital'
+
+// core：纯 Java 17 的交易规则与行情（ADR-0004）；neoforge：NeoForge 适配层
+include 'core', 'neoforge'
