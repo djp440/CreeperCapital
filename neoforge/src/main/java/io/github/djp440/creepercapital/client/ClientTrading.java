@@ -122,6 +122,11 @@ public final class ClientTrading {
         return newestFirst;
     }
 
+    /** 最近的成交，最旧的在前（图表买卖点用）。 */
+    static List<PlayerTrade> trades() {
+        return trades;
+    }
+
     /** 资金费记录，最新的在前。 */
     public static List<FundingRecord> fundingNewestFirst() {
         List<FundingRecord> newestFirst = new ArrayList<>(funding);

@@ -25,6 +25,8 @@ import net.minecraft.network.chat.Component;
  * <p>
  * 图例第二行：齿轮（展开指标设置浮层，见 {@link IndicatorPanel}）、各条均线、成交量；点图例项切换显示 / 隐藏，隐藏后图例变灰，
  * 不计算、不绘制，也不参与价格轴范围；显示状态与均线参数见 {@link IndicatorSettings}，保存在客户端配置里。
+ * <p>
+ * 图上叠加本人在当前合约上的买卖点、持仓线、强平价与当前委托（见 {@link ChartOverlay}），价格轴同步标出这些价格。
  * 持有的状态是视口、拖拽、到头反馈和浮层，K 线数据由调用方每帧传入。
  */
 final class KlineChart {
@@ -54,6 +56,8 @@ final class KlineChart {
 
     private final Font font;
     private final IndicatorPanel panel;
+    /** 本人的买卖点、持仓线、强平价与当前委托。 */
+    private final ChartOverlay overlay;
     private final List<LegendHit> legendHits = new ArrayList<>();
 
     private ChartViewport viewport = ChartViewport.latest();
@@ -79,6 +83,7 @@ final class KlineChart {
     KlineChart(Font font) {
         this.font = font;
         this.panel = new IndicatorPanel(font);
+        this.overlay = new ChartOverlay(font);
     }
 
     /** 指标设置浮层里的周期输入框；交易界面要把它们登记为子部件，才能收到键盘输入。 */
@@ -310,7 +315,12 @@ final class KlineChart {
         PriceScale scale = PriceScale.fit(mainTop, mainHeight, candles, first, last, type == ChartType.LINE, shownLines);
 
         int lastPriceY = lastPriceLabelY(scale, scale.y(candles.get(candles.size() - 1).close()));
-        extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, showVolume, volumeTop, volumeBottom, scale, lastPriceY);
+        // 本人的买卖点、持仓线、强平价与当前委托（只看当前合约）；价格轴刻度避开它们在轴上的标记
+        String symbol = ClientMarket.selectedSymbol().orElse(null);
+        List<ChartOverlay.Line> overlayLines = symbol == null ? List.of() : overlay.lines(symbol);
+        List<Integer> markTops = overlay.axisMarkTops(overlayLines, scale);
+        extractGrid(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, showVolume, volumeTop, volumeBottom, scale, lastPriceY,
+                markTops, overlay.axisMarkHeight());
         extractTimeAxis(graphics, period, candles, left, view, right, mainTop, volumeBottom, timeAxisTop);
 
         // 缩放 / 平移时最左、最右的 K 线只露出一部分：裁在绘图区之内
@@ -341,10 +351,16 @@ final class KlineChart {
                 extractAverage(graphics, ma[k], first, last, view, scale, maLines.get(k).color());
             }
         }
+        if (symbol != null) {
+            overlay.extractMarkers(graphics, symbol, candles, period.seconds(), view, scale);
+            overlay.extractLines(graphics, overlayLines, left, plotRight, scale);
+        }
         graphics.disableScissor();
         if (showVolume) {
             graphics.text(font, MarketFormat.volume(maxVolume), axisLeft + 2, volumeTop + 1, TradingPalette.TEXT_SECONDARY, false);
         }
+        overlay.extractTags(graphics, overlayLines, left, plotRight, scale);
+        overlay.extractAxisMarks(graphics, overlayLines, markTops, axisLeft, right);
         extractEdgeFeedback(graphics, left, plotRight, mainTop, mainHeight);
         if (dragging) {
             graphics.requestCursor(CursorTypes.RESIZE_EW);
@@ -395,15 +411,22 @@ final class KlineChart {
         graphics.text(font, text, textLeft + 4, mainTop + 4, TradingPalette.BRAND_YELLOW, false);
     }
 
-    /** 网格线与价格轴刻度：刻度文字不出主图区域，离最新价格标签太近的刻度不画（免得叠在一起）。 */
+    /** 网格线与价格轴刻度：刻度文字不出主图区域，离最新价格标签太近、与持仓 / 委托的价格标记重叠的刻度不画（免得叠在一起）。 */
     private void extractGrid(GuiGraphicsExtractor graphics, int left, int plotRight, int axisLeft, int right,
-            int mainTop, int mainHeight, boolean showVolume, int volumeTop, int volumeBottom, PriceScale scale, int lastPriceY) {
+            int mainTop, int mainHeight, boolean showVolume, int volumeTop, int volumeBottom, PriceScale scale, int lastPriceY,
+            List<Integer> markTops, int markHeight) {
+        grid:
         for (int line = 0; line <= GRID_LINES; line++) {
             int y = mainTop + line * (mainHeight - 1) / GRID_LINES;
             graphics.horizontalLine(left, plotRight, y, TradingPalette.GRID);
             int labelTop = Math.max(mainTop, Math.min(y - font.lineHeight / 2, mainTop + mainHeight - font.lineHeight));
             if (Math.abs(labelTop + font.lineHeight / 2 - lastPriceY) <= font.lineHeight) {
                 continue;
+            }
+            for (int markTop : markTops) {
+                if (labelTop < markTop + markHeight && markTop < labelTop + font.lineHeight) {
+                    continue grid; // 与持仓 / 委托的价格标记重叠
+                }
             }
             graphics.text(font, MarketFormat.price(scale.priceAt(y)), axisLeft + 2, labelTop, TradingPalette.TEXT_SECONDARY, false);
         }

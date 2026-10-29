@@ -22,7 +22,7 @@ import net.neoforged.neoforge.common.NeoForge;
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
  * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
- * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）。
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）；58~62 是图上的持仓线、强平价、当前委托与买卖点（#35）。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -398,7 +398,39 @@ final class ScreenshotScript {
                     "相当于点了「恢复默认」：回到 MA(7) 黄 / MA(25) 粉 / MA(99) 蓝三条均线与成交量全部显示，浮层已收起；"
                             + "客户端配置里的 indicators 回到缺省（下一次启动不受截图影响）。",
                     View.TRADING,
-                    indicators("ma=7:0:1,25:1:1,99:2:1;volume=1")));
+                    indicators("ma=7:0:1,25:1:1,99:2:1;volume=1")),
+            new ScreenshotStep("58", "图上的持仓线 / 强平价 / 当前委托 / 买卖点：DIAMONDCRP 多仓，绿涨红跌（#35，3 级验收）",
+                    "1m 周期、DIAMONDCRP；先清掉前面步骤留下的仓位与委托，再逐仓 20x 开多 1.500、加多 0.500、平掉 0.500（仓位 1.500），"
+                            + "设止盈（最新价 +1.5%）、止损（−1.2%），再挂一张低于市价 0.8% 的限价开多 0.500。图上（只看 DIAMONDCRP）："
+                            + "开仓均价处一条绿色实线，左侧 tag「多 1.500  盈亏 ±x.xx」（盈亏按标记价格，盈绿亏红的数值在 tag 里同为线色）；"
+                            + "强平价一条品牌黄虚线，tag「强平价 x,xxx.xx」，约在开仓价下方 4~5%，多半超出可见区间，此时 tag 钳在主图下沿、带朝下的箭头、不画线；"
+                            + "止盈绿虚线 tag「止盈·最新价 1.500 @ …」、止损红虚线 tag「止损·最新价 1.500 @ …」、限价绿虚线 tag「开多 限价 0.500 @ …」；"
+                            + "价格超出可见区间的 tag 钳在上沿 / 下沿并带方向箭头；tag 挤在一起时上下错开、互不重叠、不越出主图区；"
+                            + "价格轴右侧同步有这些价格的彩色标签（强平价黄底黑字），也错开不重叠，最新价格标签盖在最上面；"
+                            + "最新几根 K 线上有买卖点：最低价下方绿色「买」（同一根两笔时为「买×2」）、最高价上方红色「卖」；更早步骤在 DIAMONDCRP 上的成交若还在缓存 K 线里也标出；"
+                            + "GUNPOWDERCRP 的仓位与委托不出现在这张图上；无重叠、截断和乱码。",
+                    View.TRADING,
+                    both(both(scheme(ColorScheme.GREEN_UP), select(CandlePeriod.M1)), setupOverlayPositions())),
+            new ScreenshotStep("59", "图上的持仓线 / 强平价 / 当前委托：GUNPOWDERCRP 空仓，绿涨红跌（#35，3 级验收）",
+                    "切到 GUNPOWDERCRP（逐仓 10x 空 50 个，止盈 −1.5%、止损 +1.5%，限价开空 10 个 @ +1%，限价平空 10 个 @ −1%）："
+                            + "开仓均价处红色实线，tag「空 50  盈亏 ±x.xx」；强平价黄虚线约在开仓价上方 9%（多半钳在上沿、带朝上的箭头）；"
+                            + "止盈 tag 绿、止损 tag 红；「开空 限价」红（卖）、「平空 限价只减仓」绿（买）；最新 K 线上方有红色「卖」（开空）；"
+                            + "DIAMONDCRP 的线一条都不出现；tag、价格轴标签错开不重叠。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")),
+            new ScreenshotStep("60", "图上的持仓线 / 强平价 / 当前委托 / 买卖点：DIAMONDCRP 多仓，红涨绿跌（#35，3 级验收）",
+                    "与 58 同一份仓位与委托，只是涨跌色换成红涨绿跌：多仓实线与 tag 变红，止盈（盈利色）红、止损（亏损色）绿，限价开多（买）红，"
+                            + "买卖点「买」红、「卖」绿，强平价仍是品牌黄（不随涨跌色变）；价格轴标签的底色同步变化。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.RED_UP), selectContract("DIAMONDCRP"))),
+            new ScreenshotStep("61", "图上的持仓线 / 强平价 / 当前委托：GUNPOWDERCRP 空仓，红涨绿跌（#35，3 级验收）",
+                    "与 59 同一份仓位与委托，红涨绿跌：空仓实线与 tag 变绿，止盈红、止损绿，「开空 限价」绿、「平空 限价只减仓」红，「卖」绿；强平价仍是品牌黄。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")),
+            new ScreenshotStep("62", "切回绿涨红跌（#35）",
+                    "涨跌色回到绿涨红跌，合约回到 DIAMONDCRP；图上的线与 tag 与 58 一致（价格随行情略有变化）。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), selectContract("DIAMONDCRP"))));
 
     private ScreenshotScript() {
     }
@@ -622,6 +654,48 @@ final class ScreenshotScript {
                 });
             }
         };
+    }
+
+    /**
+     * 图表叠加信息（#35）的场景：撤掉全部当前委托、平掉全部仓位，两个合约都切回逐仓，然后
+     * DIAMONDCRP 逐仓 20x 开多 1.500、加多 0.500、平 0.500（同一根 K 线上「买×2」和「卖」），设止盈 +1.5% / 止损 −1.2%，挂限价开多 0.500 @ −0.8%；
+     * GUNPOWDERCRP 逐仓 10x 开空 50，设止盈 −1.5% / 止损 +1.5%，挂限价开空 10 @ +1%、限价平空 10 @ −1%。
+     * 几个包按发送顺序在服务端处理；客户端此刻还看着旧仓位，所以杠杆直接写在包里。
+     */
+    private static Consumer<Minecraft> setupOverlayPositions() {
+        return minecraft -> {
+            ClientTrading.openOrdersNewestFirst().forEach(order -> ClientTrading.cancel(order.id()));
+            ClientTrading.positions().forEach(position -> ClientPacketDistributor.sendToServer(
+                    new OrderPayload(OrderPayload.Action.CLOSE, position.symbol(), position.lots(), 0)));
+            for (String symbol : List.of("DIAMONDCRP", "GUNPOWDERCRP")) {
+                ClientPacketDistributor.sendToServer(new OrderPayload(OrderPayload.Action.SET_ISOLATED, symbol, 0, 10));
+            }
+            ClientTrading.setTriggerSource(TriggerSource.LAST);
+            ClientMarket.snapshot("DIAMONDCRP").ifPresent(snapshot -> {
+                double last = snapshot.lastPrice();
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 1500, 20, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 500, 20, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.CLOSE, "DIAMONDCRP", 500, 0, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.PROTECT, "DIAMONDCRP", 1500, 0, OrderPayload.Execution.MARKET, 0, last * 1.015, last * 0.988);
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 500, 20, OrderPayload.Execution.LIMIT, last * 0.992, 0, 0);
+            });
+            ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> {
+                double last = snapshot.lastPrice();
+                send(OrderPayload.Action.OPEN_SHORT, "GUNPOWDERCRP", 50, 10, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.PROTECT, "GUNPOWDERCRP", 50, 0, OrderPayload.Execution.MARKET, 0, last * 0.985, last * 1.015);
+                send(OrderPayload.Action.OPEN_SHORT, "GUNPOWDERCRP", 10, 10, OrderPayload.Execution.LIMIT, last * 1.01, 0, 0);
+                send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", 10, 0, OrderPayload.Execution.LIMIT, last * 0.99, 0, 0);
+            });
+            ClientTrading.selectLeverage("DIAMONDCRP", 20);
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 10);
+            ClientMarket.select("DIAMONDCRP");
+        };
+    }
+
+    private static void send(OrderPayload.Action action, String symbol, long lots, int leverage, OrderPayload.Execution execution,
+            double price, double takeProfit, double stopLoss) {
+        ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage, execution, price, takeProfit,
+                stopLoss, TriggerSource.LAST, false));
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {
