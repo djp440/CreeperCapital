@@ -94,3 +94,29 @@
 - K 线十字光标的时间标签会盖住下方横轴的普通刻度（与币安网页端相同的做法），未处理。
 - GameTest 偶发失败（与本票无关，未修）：20:06 第一次 `:core:test --rerun check` 时 4 个用例失败（`funding_settles_only_at_the_settlement_step…`、`funding_settles_offline_players…`、`funding_drains_isolated_margin_to_zero…` 的池子金额差约 0.1～520 CRP，`stop_loss_triggers_on_market_step_for_offline_players` 期望 CANCELLED 实为 FILLED），紧接着原样重跑、删掉 runs/gametest 重跑、完整 check、旧格式配置 check 共 4 次全绿。疑为机器负载高（core 测试与 GameTest 服务端同时跑）时实时行情步落进这些用例的窗口，改动了共用活账本。本票 GameTest 服务端不加载客户端代码，core 改动只新增 `estimateOpen`，成交路径等价。
 - 极小窗口（320×240 界面坐标）下布局不重叠，但下单面板、表格内容大量截断，只保证「能看、不错位」，不保证好用；最低推荐为 GUI 缩放后 ≥ 427×240。
+
+## 2026-10-29 20:43：code-review 修复后留给用户决策的事项（分支 fix/code-review）
+
+以下均未实现，仅记录，等用户拍板：
+
+- TradingBook 已近 1000 行，是否按职责拆分（开平仓 / 强平与 ADL / 资金费 / 资产计算）。
+- Order 构造器 16 个参数、ContractSpec 11 个组件、TradingParams 与它们字段重复：是否引入 builder 或把参数分组成小的值对象。
+- 下单结果码（`"open_long"`、`"limit_filled"` 等字符串）是否改成枚举，网络载荷里仍按名字传。
+- 枚举在网络协议里按序号（ordinal）编码的风险：在中间插入新常量会让新旧客户端错位；存档已改为按名字（EnumCodecs），网络载荷尚未。
+- `ServerTrading.liquidate` / `deleverage` 骨架（遍历事件、日志、通知在线 / 离线、markDirty）几乎相同，是否合并成一个模板。
+- 提交标题里出现过 `wip:` 前缀，合入主干前是否整理。
+- `pool.payUpTo` 在池子余额不足时静默截断盈利支付（TradingBook 约 442 / 590 / 859 行，ADR-0007）：玩家实际拿到的比账面盈亏少，是否需要显式提示或记入欠款。
+- #11 的分档名义价值上限（`MarginTiers.DEFAULT_MAX_NOTIONAL` 500,000）是固定值，没有随池子规模缩放：池子越大是否应放宽。
+- 强平 / ADL 的成交带玩家名进入「最新成交」流：是否要对被强平玩家的名字做匿名处理（隐私 / 社交压力）。
+- `adjustLeverage` 的自动补保证金行为与币安不同（币安调低杠杆要求先有足够可用余额，这里会自动从可用余额挪入）：是否对齐。
+- GUNPOWDERCRP 的起始价格是 100，规格（#1）写的是 0.05：是改规格还是改配置。
+
+## 本次修复里做了取舍的两点
+
+- A6（SimulatedTrades 把成交量折成手数时的余数）没有做：它是刻意无状态、可重复调用的确定性函数（每个行情步按步号重算，不进存档，`Market.simulatedTrades` 文档也写明无状态），
+  逐步结转余数必须引入需要持久化的状态并改变存档格式；而每步误差最多 0.5 手，相对钻石每步数千手、火药每步约 50 手可以忽略。
+  若以后一定要守恒，可以考虑「按步号做确定性的随机取整」（无状态、期望守恒），请决定是否值得做。
+- 立即成交的限价单（穿越了最优档）按虚拟流动性曲线的平均价成交，但不会差于委托价（买入取 min(平均价, 委托价)，卖出取 max）。
+  这是对 spec「按第一档判断是否穿越」的最自然延伸，但 spec 没写成交价怎么定；另一种做法是整单按第一档价成交（对玩家更有利、与 maker 费一致）。
+- 残余宽松：`MarginMath.assess` 的输入 `walletBalance` 仍包含逐仓合约挂单冻结的资金，所以全仓强平的触发判断比实际没收的范围略宽松
+  （实际没收只涉及全仓范围的资源）。偏差是保守方向（该强平时可能晚一点点），要不要收紧请决定。

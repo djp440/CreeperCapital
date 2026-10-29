@@ -1,5 +1,23 @@
 # MEMORY
 
+## 2026-10-29 20:43 code-review 修复的设计要点（分支 fix/code-review）
+
+- 限价单是否「穿越」只看流动性曲线的第一档（`spec.liquidityCurve(last).touchPrice(buy)` 与委托价比较），不看整单平均价：滑点只影响成交价，不影响能不能成交。
+  立即成交时成交价取曲线平均价并限制在委托价之内（买不高于、卖不低于委托价），走 `openAt` / `closeAt`（收 taker 费）。
+- 限价挂单检查资金用 `assets().availableBalance`（已扣全仓浮亏），与 `openAt` 同一口径。
+- 全仓强平的撤单、没收范围只含「保证金模式是全仓」的合约（`marginMode(player, symbol) == CROSS`）；逐仓合约的挂单冻结资金不动。
+  已知残余：`MarginMath.assess` 的钱包余额仍含逐仓挂单冻结，触发判断略宽松（见 memo-fix.md）。
+- `TradingBook.estimateLimit(TradingParams, price, lots, leverage)`：下单面板的限价预估与服务端冻结金额共用同一个定点数计算，界面不再用 double 算金额。
+- `checkSolvency`：池子权益只算一次，每次 ADL 后用事件的 `lostProfit` 增量更新，避免 O(n²)。
+- 魔数收口：`Money.UNITS_PER_CRP`、`ContractSpec.quantityOf` / `lotsPerUnit`、`MarginMath.hasMark` 是共用入口，不要再各处写 `1_000_000` / `Math.pow(10, dec)`。
+- 存档里的枚举统一用 `server/EnumCodecs.of(Class)` 按名字编码（TradingSavedData、OfflineSummarySavedData），不要再手写序号 codec。
+- `OfflineSummaries.record(OrderEvent, …)` 的 switch 有 `default` 抛异常，新增委托类型时会立刻暴露而不是静默丢事件。
+- GameTest：`StageOrderGameTests` 用一次 `ServerTrading.onMarketStep` 验证四阶段顺序（止盈 → 资金费 → 强平 → ADL）。
+  共用账本的池子没法在 neoforge 里直接抽干，所以用 GUNPOWDERCRP 上以 1/20 价格开的杠杆 1 巨额多头让池子权益转负，收尾用 `fundPool` 把被平仓支付掉的池子补回。
+  `helper.succeedWhen` 的回调会反复重试，清理（离线 / 平仓 / 提现）必须放在全部断言通过之后，不能放 finally。
+  `assertValueEqual` 的参数是（期望，实际）：失败信息里「to be X: was Y」中 X 是第一个参数。
+- 截图脚本现为 41 步：01~27 绿涨红跌，28~40 红涨绿跌（38 全仓 / 杠杆 / ADL 灯、39 多头强平记录、40 钻石盘口），41 切回。
+
 ## 2026-10-29 21:00 翻译键完整性检查与验收清单（#20）
 
 - 检查放在 `neoforge/src/test`（JUnit，`LangFilesTest` + `LangChecksTest`），`./gradlew check` 自带 `:neoforge:test`。选 JUnit 不选 GameTest：只读文件、秒级完成、不用拉起服务端。不引入 JSON 库，自带“只认扁平字符串对象”的小解析器，因为 Gson 之类会静默吞重复键（#16 踩过），而重复键正是要抓的。
