@@ -18,7 +18,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图、右侧的下单面板（{@link OrderPanel}）和底部表格区（资产、仓位、成交历史三页）。
+ * 交易界面（币安深色主题）：顶部行情栏、周期切换栏、K 线图、右侧的下单面板（{@link OrderPanel}）和底部表格区（资产、仓位、当前委托、历史委托、成交历史五页）。
  * <p>
  * 行情栏左侧是当前合约的交易代码，市场里有多个合约时带下拉箭头，点开列表可以切换合约（各合约的行情、K 线互相独立）；
  * 其后依次是最新价格、标记价格、指数价格、资金费率与结算倒计时、市场时间，以及 24h 涨跌、最高、最低、成交量；
@@ -39,7 +39,7 @@ public final class TradingScreen extends Screen {
     private static final int CARET_GAP = 6;
     private static final int CARET_HALF_WIDTH = 3;
     private static final int HOVER = 0xFF1E2329;
-    /** 底部表格区：一排页签（资产、仓位、成交历史）加该页的数据，之后的委托、资金费等页签往这里加。 */
+    /** 底部表格区：一排页签（资产、仓位、当前委托、历史委托、成交历史）加该页的数据，之后的资金费等页签往这里加。 */
     private static final int TABLE_TAB_HEIGHT = 16;
     private static final int TABLE_HEIGHT = 96;
     /** 下单面板与图表之间的间距。 */
@@ -49,6 +49,8 @@ public final class TradingScreen extends Screen {
     private enum TableTab {
         ASSETS("screen.creepercapital.trading.table.assets"),
         POSITIONS("screen.creepercapital.trading.table.positions"),
+        OPEN_ORDERS("screen.creepercapital.trading.table.open_orders"),
+        ORDER_HISTORY("screen.creepercapital.trading.table.order_history"),
         TRADES("screen.creepercapital.trading.table.trades");
 
         private final String key;
@@ -92,6 +94,14 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，下单面板切到限价并填好委托价和数量，底部表格切到某页。 */
+    public static void openForLimitOrder(String tab, String quantity, String price) {
+        openForTrading(tab, quantity);
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.orderPanel.setLimit(price);
+        }
+    }
+
     public static void open() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
@@ -112,6 +122,7 @@ public final class TradingScreen extends Screen {
         ClientKlines.open();
         // 输入框只登记为子部件（接收键盘和点击），不放进可渲染列表：它要画在下单面板的底色之上，由面板自己渲染
         addWidget(orderPanel.quantityBox());
+        addWidget(orderPanel.priceBox());
     }
 
     /** 单人游戏里打开交易界面不暂停游戏，市场照常推进。 */
@@ -127,8 +138,8 @@ public final class TradingScreen extends Screen {
             contractMenuOpen = false;
             return true;
         }
-        if (orderPanel.quantityBox().isFocused() && event.key() != GLFW.GLFW_KEY_ESCAPE) {
-            // 在数量输入框里打字时，快捷键字母不能关掉界面
+        if ((orderPanel.quantityBox().isFocused() || orderPanel.priceBox().isFocused()) && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+            // 在数量 / 委托价输入框里打字时，快捷键字母不能关掉界面
             return super.keyPressed(event);
         }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
@@ -142,12 +153,14 @@ public final class TradingScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0 && clickedContractControls(event.x(), event.y())) {
             orderPanel.quantityBox().setFocused(false);
+            orderPanel.priceBox().setFocused(false);
             return true;
         }
         if (event.button() == 0) {
             String symbol = ClientMarket.selectedSymbol().orElse(null);
             if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
                 orderPanel.quantityBox().setFocused(false);
+                orderPanel.priceBox().setFocused(false);
                 return true;
             }
             if (clickedTableControls(event.x(), event.y())) {
@@ -182,7 +195,7 @@ public final class TradingScreen extends Screen {
             }
             return false;
         }
-        return tableTab == TableTab.POSITIONS && tables.mouseClicked(x, y);
+        return (tableTab == TableTab.POSITIONS || tableTab == TableTab.OPEN_ORDERS) && tables.mouseClicked(x, y);
     }
 
     /** 点在交易代码按钮上就展开/收起合约列表；列表展开时点列表项切换合约，点别处只收起列表。返回是否已处理这次点击。 */
@@ -450,6 +463,11 @@ public final class TradingScreen extends Screen {
                 extractAssets(graphics, bodyTop);
             }
             case POSITIONS -> tables.extractPositions(graphics, PADDING, bodyTop, width - PADDING, height, mouseX, mouseY);
+            case OPEN_ORDERS -> tables.extractOpenOrders(graphics, PADDING, bodyTop, width - PADDING, height, mouseX, mouseY);
+            case ORDER_HISTORY -> {
+                tables.forgetButtons();
+                tables.extractOrderHistory(graphics, PADDING, bodyTop, width - PADDING, height);
+            }
             case TRADES -> {
                 tables.forgetButtons();
                 tables.extractTrades(graphics, PADDING, bodyTop, width - PADDING, height);
