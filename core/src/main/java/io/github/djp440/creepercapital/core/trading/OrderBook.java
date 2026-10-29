@@ -172,6 +172,11 @@ public final class OrderBook {
         Money frozen;
         try {
             frozen = TradingBook.frozenFor(spec, price, lots, leverage);
+            // 持仓总量上限：挂单时按委托价检查一次，不让注定超限的单子占着冻结的资金；成交时 openAt 还会复检
+            TradeResult overCap = book.checkOpenInterest(spec, lots, price, markPrice);
+            if (overCap != null) {
+                return overCap;
+            }
         } catch (ArithmeticException e) {
             return TradeResult.reject(TradeResult.Reason.INVALID_QUANTITY);
         }
@@ -378,6 +383,14 @@ public final class OrderBook {
      * @return 这一步触发 / 成交 / 撤销的委托事件，按发生顺序（含此前玩家平仓留下的失效事件）
      */
     public List<OrderEvent> onSnapshot(ContractSpec spec, MarketSnapshot snapshot) {
+        return onSnapshot(spec, snapshot, onlyThisContract(snapshot));
+    }
+
+    /**
+     * 同上，限价委托成交时的持仓总量上限复检用全部合约的标记价格估算池子权益（上限随池子权益变化，成交时重新算）；
+     * 超限的挂单撤销（{@link CancelReason#FILL_REJECTED}）。
+     */
+    public List<OrderEvent> onSnapshot(ContractSpec spec, MarketSnapshot snapshot, ToDoubleFunction<String> markPrice) {
         List<OrderEvent> events = new ArrayList<>(takeEvents());
         long now = snapshot.time().totalSeconds();
         for (Order order : List.copyOf(open.values())) {
@@ -396,7 +409,7 @@ public final class OrderBook {
                     fillReduceOnlyLimit(order, position, spec, now, events);
                 }
             } else if (crosses(spec, snapshot, order.side(), TradeKind.OPEN, order.lots(), order.price())) {
-                events.add(fill(order, spec, now));
+                events.add(fill(order, spec, now, markPrice));
             }
             events.addAll(takeEvents());
         }
@@ -469,13 +482,13 @@ public final class OrderBook {
     }
 
     /** 委托价成交：冻结的资金先划回可用余额，再按委托价以 maker 费率开仓（所需正好等于冻结）；附带的止盈止损此时生效。 */
-    private OrderEvent fill(Order order, ContractSpec spec, long marketSeconds) {
+    private OrderEvent fill(Order order, ContractSpec spec, long marketSeconds, ToDoubleFunction<String> markPrice) {
         open.remove(order.id());
         release(order);
         TradeResult invalid = book.validateOpen(order.player(), spec, order.side(), order.lots(), order.leverage());
         TradeResult result = invalid != null ? invalid
                 : book.openAt(order.player(), spec, marketSeconds, order.side(), order.lots(), order.leverage(),
-                        order.price(), MAKER_FEE);
+                        order.price(), MAKER_FEE, markPrice);
         if (result instanceof TradeResult.Filled filled) {
             PlayerTrade trade = filled.trade();
             remember(order.filled(trade.price(), trade.fee(), marketSeconds));

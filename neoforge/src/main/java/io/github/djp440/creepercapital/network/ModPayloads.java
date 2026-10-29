@@ -12,7 +12,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
  * 本模组的网络载荷。客户端处理器在 {@code CreeperCapitalClient} 里单独注册，专用服务端不加载客户端类。
  */
 public final class ModPayloads {
-    private static final String PROTOCOL_VERSION = "13";
+    private static final String PROTOCOL_VERSION = "14";
 
     private ModPayloads() {
     }
@@ -37,6 +37,7 @@ public final class ModPayloads {
                 .playToClient(TradingStatePayload.TYPE, TradingStatePayload.STREAM_CODEC)
                 .playToClient(OrderResultPayload.TYPE, OrderResultPayload.STREAM_CODEC)
                 .playToClient(LatestTradesPayload.TYPE, LatestTradesPayload.STREAM_CODEC)
+                .playToClient(AdlLightsPayload.TYPE, AdlLightsPayload.STREAM_CODEC)
                 .playToServer(OrderPayload.TYPE, OrderPayload.STREAM_CODEC,
                         (payload, context) -> {
                             if (context.player() instanceof ServerPlayer player) {

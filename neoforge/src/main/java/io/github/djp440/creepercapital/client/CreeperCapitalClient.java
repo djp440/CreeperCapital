@@ -6,6 +6,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 
 import io.github.djp440.creepercapital.CreeperCapital;
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.KlineHistoryPayload;
 import io.github.djp440.creepercapital.network.LatestTradesPayload;
 import io.github.djp440.creepercapital.network.MarketSnapshotPayload;
@@ -54,6 +55,7 @@ public final class CreeperCapitalClient {
         event.register(TradingStatePayload.TYPE, (payload, context) -> ClientTrading.accept(payload));
         event.register(OrderResultPayload.TYPE, (payload, context) -> ClientTrading.accept(payload));
         event.register(LatestTradesPayload.TYPE, (payload, context) -> ClientLatestTrades.accept(payload));
+        event.register(AdlLightsPayload.TYPE, (payload, context) -> ClientTrading.accept(payload));
         event.register(OpenTradingScreenPayload.TYPE, (payload, context) -> TradingScreen.open());
     }
 

@@ -21,6 +21,8 @@ import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
+import io.github.djp440.creepercapital.core.trading.AdlRanking;
+import io.github.djp440.creepercapital.core.trading.AutoDeleverageEvent;
 import io.github.djp440.creepercapital.core.trading.CancelReason;
 import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
@@ -36,6 +38,7 @@ import io.github.djp440.creepercapital.core.trading.TradeKind;
 import io.github.djp440.creepercapital.core.trading.TradeResult;
 import io.github.djp440.creepercapital.core.trading.TradingBook;
 import io.github.djp440.creepercapital.network.AccountPayload;
+import io.github.djp440.creepercapital.network.AdlLightsPayload;
 import io.github.djp440.creepercapital.network.CancelOrderPayload;
 import io.github.djp440.creepercapital.network.ModPayloads;
 import io.github.djp440.creepercapital.network.OrderPayload;
@@ -311,7 +314,8 @@ public final class ServerTrading {
         List<OrderEvent> events = new ArrayList<>();
         for (MarketSnapshot snapshot : snapshots) {
             if (ServerMarket.symbols().contains(snapshot.symbol())) {
-                events.addAll(book.orders().onSnapshot(ServerMarket.spec(snapshot.symbol()), snapshot));
+                // 限价单成交时要重查持仓总量上限，需要各合约的标记价格
+                events.addAll(book.orders().onSnapshot(ServerMarket.spec(snapshot.symbol()), snapshot, ServerTrading::markPrice));
             }
         }
         Set<UUID> touched = new LinkedHashSet<>();
@@ -331,17 +335,58 @@ public final class ServerTrading {
         if (!events.isEmpty()) {
             markDirty();
         }
-        // 同一个行情步内的顺序：① 委托触发（上面）→ ② 资金费结算 → ③ 强平检查。后加的阶段按这个顺序接在后面
+        // 同一个行情步内的顺序：① 委托触发（上面）→ ② 资金费结算 → ③ 强平检查 → ④ 偿付检查（ADL）。
+        // ADL 必须在强平之后：强平先把穿仓的亏损仓位收走，池子权益才反映真实缺口，免得白白减掉盈利玩家的仓位
         touched.addAll(settleFunding(server, snapshots));
         liquidationStage(server, snapshots, touched);
+        autoDeleverageStage(server, snapshots, touched);
+        // 指示灯随价格每步都变，所有持仓玩家每步都发；排名全服共用一份，算一次
+        AdlRanking ranking = book.adlRanking(ServerTrading::markPrice);
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             if (touched.contains(player.getUUID())) {
-                sendState(player);
+                sendState(player, ranking);
+            } else if (!book.positions(player.getUUID()).isEmpty()) {
+                sendLights(player, ranking);
             }
             if (touched.contains(player.getUUID()) || !book.positions(player.getUUID()).isEmpty()) {
                 ModPayloads.sendTo(player, new AccountPayload(assets(player.getUUID())));
             }
         }
+    }
+
+    /** 行情步的第 ④ 阶段：池子权益为负时按 ADL 排名自动减仓（离线玩家同样处理），被减仓的玩家记入 {@code touched}。 */
+    private static void autoDeleverageStage(MinecraftServer server, List<MarketSnapshot> snapshots, Set<UUID> touched) {
+        if (snapshots.isEmpty()) {
+            return;
+        }
+        deleverage(server, snapshots.get(0).time().totalSeconds(), ServerTrading::markPrice, player -> true, touched);
+    }
+
+    /**
+     * 偿付检查并通知（规则见 {@link TradingBook#checkSolvency}）。{@code players} 限定缩减哪些玩家的仓位，用途同 {@link #liquidate}。
+     * 在线玩家收到提示，离线玩家记进离线汇总（#19）。
+     */
+    public static List<AutoDeleverageEvent> deleverage(MinecraftServer server, long marketSeconds,
+            ToDoubleFunction<String> markPrice, Predicate<UUID> players, Set<UUID> touched) {
+        List<AutoDeleverageEvent> events = book().checkSolvency(players, markPrice, marketSeconds);
+        for (AutoDeleverageEvent event : events) {
+            LOGGER.info("自动减仓 #{} {} {} {} {}（名次 {}）：{} 手 @ {}（标记价格 {}），剩 {} 手，损失浮盈 {}，退回保证金 {}", event.tradeId(),
+                    event.player(), event.mode(), event.side(), event.symbol(), event.rank(), event.lots(), event.price(),
+                    event.markPrice(), event.remainingLots(), event.lostProfit(), event.releasedMargin());
+            touched.add(event.player());
+            ServerPlayer owner = server.getPlayerList().getPlayer(event.player());
+            if (owner == null) {
+                ServerOfflineSummary.onAutoDeleverage(server, event);
+                continue;
+            }
+            int decimals = ServerMarket.spec(event.symbol()).quantityDecimals();
+            ModPayloads.sendTo(owner, new OrderResultPayload(false, "auto_deleveraged", List.of(event.symbol(),
+                    formatQuantity(event.lots(), decimals), formatPrice(event.price()), event.lostProfit().toDisplayString())));
+        }
+        if (!events.isEmpty()) {
+            markDirty();
+        }
+        return events;
     }
 
     /** 行情步的第 ③ 阶段：用这一步的标记价格检查全部仓位（离线玩家同样检查），强平的玩家记入 {@code touched}。 */
@@ -433,6 +478,11 @@ public final class ServerTrading {
 
     /** 把这名玩家的交易状态（各合约的下单参数、全部仓位、最近的成交、委托、资金费记录）发给他。 */
     public static void sendState(ServerPlayer player) {
+        sendState(player, book().adlRanking(ServerTrading::markPrice));
+    }
+
+    /** 同上，排名由调用方给（行情步里全服共用一份）；状态之后紧跟 ADL 指示灯，两者对应同一时刻的仓位。 */
+    private static void sendState(ServerPlayer player, AdlRanking ranking) {
         List<PlayerTrade> trades = book().trades(player.getUUID());
         List<PlayerTrade> recent = trades.subList(Math.max(0, trades.size() - SYNCED_TRADES), trades.size());
         List<TradingParams> contracts = ServerMarket.symbols().stream().map(s -> ServerMarket.spec(s).trading()).toList();
@@ -445,6 +495,12 @@ public final class ServerTrading {
         List<FundingRecord> recentFunding = funding.subList(Math.max(0, funding.size() - SYNCED_TRADES), funding.size());
         ModPayloads.sendTo(player,
                 new TradingStatePayload(contracts, book().positions(player.getUUID()), recent, orders, cross, recentFunding));
+        sendLights(player, ranking);
+    }
+
+    /** 把这名玩家各仓位的 ADL 指示灯格数发给他（只含盈利的仓位，其余客户端按最低的 1 格显示）。 */
+    private static void sendLights(ServerPlayer player, AdlRanking ranking) {
+        ModPayloads.sendTo(player, new AdlLightsPayload(ranking.lightsOf(player.getUUID())));
     }
 
     private static void markDirty() {

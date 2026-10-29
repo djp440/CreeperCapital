@@ -8,6 +8,7 @@ import java.util.Map;
 import io.github.djp440.creepercapital.core.account.Money;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTime;
+import io.github.djp440.creepercapital.core.trading.AdlRanking;
 import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.MarginMath;
 import io.github.djp440.creepercapital.core.trading.MarginMode;
@@ -36,7 +37,8 @@ import net.minecraft.network.chat.Component;
 final class TradeTables {
     static final int ROW_HEIGHT = 12;
     static final int HEADER_HEIGHT = 12;
-    private static final int[] POSITION_WEIGHTS = {24, 8, 10, 10, 10, 8, 13, 21, 9};
+    private static final int[] POSITION_WEIGHTS = {21, 7, 8, 8, 9, 8, 13, 22, 7, 9};
+    private static final int LIGHT_WIDTH = 3;
     private static final int[] TRADE_WEIGHTS = {19, 14, 9, 13, 11, 12, 16};
     private static final int[] FUNDING_WEIGHTS = {16, 14, 8, 12, 12, 15, 14, 9};
     private static final int[] OPEN_ORDER_WEIGHTS = {14, 13, 8, 13, 13, 11, 12, 8};
@@ -65,7 +67,7 @@ final class TradeTables {
         forgetButtons();
         int[] columns = columns(left, right, POSITION_WEIGHTS);
         header(graphics, top, columns, "symbol", "size", "entry_price", "mark_price", "liq_price", "margin_ratio", "margin",
-                "pnl", "action");
+                "pnl", "adl", "action");
         List<Position> positions = ClientTrading.positions();
         if (positions.isEmpty()) {
             empty(graphics, left, right, top + HEADER_HEIGHT, bottom, "screen.creepercapital.trading.positions.empty");
@@ -98,13 +100,27 @@ final class TradeTables {
             cell(graphics, columns[5], y, MarginMath.formatRatio(ratio), ratioColor);
             cell(graphics, columns[6], y, position.margin().toDisplayString(), BinancePalette.TEXT_PRIMARY);
             cell(graphics, columns[7], y, signedMoney(pnl) + " (" + MarketFormat.signedPercent(roe) + ")", pnlColor);
+            lights(graphics, columns[8], y, ClientTrading.adlLights(position.symbol()));
             Component label = Component.translatable("screen.creepercapital.trading.positions.close");
-            int[] box = {columns[8], y, columns[8] + font.width(label) + 8, y + ROW_HEIGHT - 1};
+            int[] box = {columns[9], y, columns[9] + font.width(label) + 8, y + ROW_HEIGHT - 1};
             boolean hovered = mouseX >= box[0] && mouseX < box[2] && mouseY >= box[1] && mouseY < box[3];
             graphics.fill(box[0], box[1], box[2], box[3], hovered ? BUTTON_HOVER : BUTTON_BACKGROUND);
             graphics.text(font, label, box[0] + 4, y + 2, BinancePalette.TEXT_PRIMARY, false);
             closeBoxes.add(box);
             closeSymbols.add(position.symbol());
+        }
+    }
+
+    /**
+     * ADL 指示灯（#17）：五根逐渐增高的小柱，亮的用品牌黄、没亮的用分隔线灰；亮得越多越先被自动减仓。
+     * 格数由服务端按全服排名算好同步过来，这里只画。
+     */
+    private static void lights(GuiGraphicsExtractor graphics, int x, int rowTop, int lit) {
+        int bottom = rowTop + ROW_HEIGHT - 1;
+        for (int i = 0; i < AdlRanking.LIGHTS; i++) {
+            int left = x + i * (LIGHT_WIDTH + 1);
+            graphics.fill(left, bottom - (2 + 2 * i), left + LIGHT_WIDTH, bottom,
+                    i < lit ? BinancePalette.BRAND_YELLOW : BinancePalette.DIVIDER);
         }
     }
 
@@ -122,8 +138,8 @@ final class TradeTables {
             int y = top + HEADER_HEIGHT + i * ROW_HEIGHT;
             int decimals = ClientTrading.params(trade.symbol()).map(p -> p.quantityDecimals()).orElse(0);
             boolean opensLong = (trade.side() == Side.LONG) == (trade.kind() == TradeKind.OPEN);
-            // 强平用品牌黄色，一眼和主动平仓区分开
-            int sideColor = trade.kind() == TradeKind.LIQUIDATION ? BinancePalette.BRAND_YELLOW
+            // 强平和自动减仓用品牌黄色，一眼和主动平仓区分开
+            int sideColor = trade.kind() == TradeKind.LIQUIDATION || trade.kind() == TradeKind.ADL ? BinancePalette.BRAND_YELLOW
                     : opensLong ? BinancePalette.UP : BinancePalette.DOWN;
             int pnlColor = trade.realizedPnl().units() > 0 ? BinancePalette.UP
                     : trade.realizedPnl().units() < 0 ? BinancePalette.DOWN : BinancePalette.TEXT_PRIMARY;

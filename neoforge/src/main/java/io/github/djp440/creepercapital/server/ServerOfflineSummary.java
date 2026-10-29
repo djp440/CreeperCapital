@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.trading.AutoDeleverageEvent;
 import io.github.djp440.creepercapital.core.trading.FundingRecord;
 import io.github.djp440.creepercapital.core.trading.LiquidationEvent;
 import io.github.djp440.creepercapital.core.trading.OfflineSummaries;
@@ -97,6 +98,17 @@ public final class ServerOfflineSummary {
         }
     }
 
+    /** 自动减仓（#17）：金额记成交额，和成交历史里那行自动减仓对得上。 */
+    public static void onAutoDeleverage(MinecraftServer server, AutoDeleverageEvent event) {
+        if (data == null || server.getPlayerList().getPlayer(event.player()) != null) {
+            return;
+        }
+        int decimals = ServerMarket.symbols().contains(event.symbol())
+                ? ServerMarket.spec(event.symbol()).quantityDecimals() : 0;
+        data.summaries().record(event, decimals);
+        data.setDirty();
+    }
+
     /** 汇总通知：标题、每类有事件的一行（次数与金额）、提示去哪看明细。一条聊天消息，行之间用换行连接。 */
     public static Component message(Summary summary) {
         MutableComponent message = Component.translatable(KEY_PREFIX + "header").withStyle(ChatFormatting.GOLD);
@@ -110,9 +122,9 @@ public final class ServerOfflineSummary {
         return message.append("\n").append(Component.translatable(KEY_PREFIX + "footer").withStyle(ChatFormatting.GRAY));
     }
 
-    /** 盈亏、资金费这类带符号的金额显示正负号，成交额不带。 */
+    /** 盈亏、资金费这类带符号的金额显示正负号，成交额（委托成交、自动减仓）不带。 */
     private static String amountText(EventType type, Money amount) {
-        boolean signed = type != EventType.ORDER_FILL;
+        boolean signed = type != EventType.ORDER_FILL && type != EventType.AUTO_DELEVERAGE;
         return (signed && amount.isPositive() ? "+" : "") + amount.toDisplayString();
     }
 

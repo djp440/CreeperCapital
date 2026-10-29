@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
@@ -234,12 +235,16 @@ class TradingBookTest {
     @Test
     @DisplayName("池子余额不够付盈利时，最多付出池子全部余额，池子不会为负")
     void poolPaysAtMostItsBalance() {
-        pool = new LiquidityPool(Money.parse("10"));
-        book = new TradingBook(accounts, pool);
-        deposit("1000");
-        book.open(ALICE, DIAMOND, snapshot(DIAMOND, 1000, 1000), Side.LONG, 2000, 10);
+        // 池子权益不足时由每步的自动减仓处理（#17）；这里是最后的兜底：池子只剩 11.00025，持仓总量上限会拒绝这么小的池子上的开仓，
+        // 所以直接用存档摆出一个 2000 手、开仓价 1000.25 的仓位
+        pool = new LiquidityPool(Money.parse("11.00025"));
+        book = TradingBook.restore(accounts, new TradingState(Money.parse("11.00025"), 0,
+                Map.of(ALICE, List.of(new Position("DIAMONDCRP", Side.LONG, 2000, 1000.25, 10, Money.parse("200.05"), 3))),
+                Map.of()));
+        pool = book.pool();
+        deposit("798.94975");
 
-        // 开仓后池子是 10 + 1.00025 = 11.00025，应付盈利 199 只能付出这 11.00025；手续费 1.09975 仍归池子
+        // 池子只有 11.00025，应付盈利 199 只能付出这 11.00025；手续费 1.09975 仍归池子
         PlayerTrade trade = filled(book.close(ALICE, DIAMOND, snapshot(DIAMOND, 1100, 1100), 2000));
 
         assertEquals(Money.parse("11.00025"), trade.realizedPnl());
