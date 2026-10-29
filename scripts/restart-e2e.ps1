@@ -6,6 +6,9 @@
 #   2. 第二次启动：断言从存档恢复、步数与停服时一致、暂停保持；每个合约（DIAMONDCRP、GUNPOWDERCRP）的 K 线文件读回的根数与步数一致（不缺不重）；
 #      等待数秒确认冻结（不补算、不推进）。然后 creeper dev market resume，断言排队的跳跃恰好发生在「停服步数 + 1」，
 #      下一个行情步也恰好是「停服步数 + 1」。运行中 stop。
+#      开始前往世界里放一个测试玩家的玩家数据文件（模拟进过服的离线玩家），暂停前对它 dev deposit，
+#      并用一个从没进过服的名字验证未知玩家被拒绝。第 2、3 次启动断言该玩家的余额与停服前一致（账户随存档保存）；
+#      第 2 次再扣除一部分，第 3 次断言扣除后的余额也保持。
 #   3. 离线几秒后第三次启动：断言恢复的步数不变、K 线根数仍与步数一致，第一个行情步仍是「停服步数 + 1」（运行中停服同样不补算）。
 # 断言依据服务端自己写的开发日志 logs/yyyy-MM-dd HH-mm-ss.log（每次启动一个文件）；
 # 服务端控制台输出另存为 logs/restart-e2e <时间> 第N次.stdout.log，本脚本的过程记录在 logs/restart-e2e <时间>.log。
@@ -152,8 +155,21 @@ function Assert-Klines($server, [long]$step, [string]$who) {
         Assert-True ([long]$m.Groups[3].Value -eq [math]::Floor($step / 14400) + 1) "${who}：$symbol 的 1d K 线 $($m.Groups[3].Value) 根，与步数 $step 对应"
     }
 }
+# 离线模式下玩家名对应的 UUID：MD5("OfflinePlayer:名字")，再写入版本 3 与变体位（与 Java 的 UUID.nameUUIDFromBytes 一致）。
+function Get-OfflineUuid([string]$name) {
+    $bytes = [System.Security.Cryptography.MD5]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes("OfflinePlayer:$name"))
+    $bytes[6] = ($bytes[6] -band 0x0f) -bor 0x30
+    $bytes[8] = ($bytes[8] -band 0x3f) -bor 0x80
+    $hex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+    return "$($hex.Substring(0, 8))-$($hex.Substring(8, 4))-$($hex.Substring(12, 4))-$($hex.Substring(16, 4))-$($hex.Substring(20))"
+}
+# 名字缓存按小写名字解析，离线 UUID 也据此计算，所以用全小写的名字
+$trader = 'e2etrader'
 try {
     if (Test-Path $worldDir) { Remove-Item -Recurse -Force $worldDir }
+    $playerDataDir = Join-Path $worldDir 'players/data'
+    New-Item -ItemType Directory -Force $playerDataDir | Out-Null
+    New-Item -ItemType File -Force (Join-Path $playerDataDir "$(Get-OfflineUuid $trader).dat") | Out-Null
 
     # ---- 第一次启动：行情推进、暂停、停服 ----
     $first = Start-Server '第 1 次' 1
@@ -164,6 +180,11 @@ try {
     $firstStepLine = Wait-ForLine $first $stepLog 60
     $backfilledStep = Get-Step $firstStepLine $stepLog
     Assert-True ($backfilledStep -eq 432000) "预生成结束于第 431999 步，实时行情从第 $backfilledStep 步接上，没有跳步"
+    Send-Command $first "creeper dev deposit $trader 12345.678901"
+    Wait-ForLine $first '12,345.678901 CRP|已向 ' 30 | Out-Null
+    Send-Command $first 'creeper dev deposit NeverJoinedGuy 5'
+    Wait-ForLine $first 'Unknown player|没有这个玩家' 30 | Out-Null
+    Write-Log "[PASS] 已向 $trader 充值，未知玩家 NeverJoinedGuy 被拒绝"
     Send-Command $first 'creeper dev market advance 2000'
     Wait-ForLine $first 'Market advanced|市场已快进' 60 | Out-Null
     Send-Command $first 'creeper dev market pause'
@@ -190,6 +211,11 @@ try {
     Assert-True ($restoreLine -match '暂停=true') '暂停状态在重启后保持'
     Assert-Klines $second $savedStep '第 2 次启动'
 
+    # 账户随存档保存：查余额的办法是扣除 0（被拒绝）以外的最小单位——直接扣除 0.000001 并看返回的余额
+    Send-Command $second "creeper dev withdraw $trader 0.000001"
+    $withdrawLine = Wait-ForLine $second '余额 [\d,.]+ CRP|balance [\d,.]+ CRP' 30
+    Assert-True ($withdrawLine -match '12,345\.678900 CRP|12,345\.6789 CRP') "重启后账户余额仍在：充值 12345.678901 再扣 0.000001，余额 12,345.6789 CRP"
+
     Start-Sleep -Seconds $FrozenWaitSec
     $advanced = @(Drain-Matching $second $stepLog)
     Assert-True ($advanced.Count -eq 0) "暂停期间 $FrozenWaitSec 秒内没有任何行情步"
@@ -215,6 +241,9 @@ try {
     Assert-True ($restoreLine3 -match '暂停=false') '未暂停的市场重启后仍在运行'
     Assert-Klines $third $savedStep2 '第 3 次启动'
     Assert-True (@($third.Seen | Where-Object { $_ -match '预生成 \d+ 个市场日的历史' }).Count -eq 0) '已有世界重启不会重复预生成历史'
+    Send-Command $third "creeper dev withdraw $trader 0.000001"
+    $withdrawLine3 = Wait-ForLine $third '余额 [\d,.]+ CRP|balance [\d,.]+ CRP' 30
+    Assert-True ($withdrawLine3 -match '12,345\.678899 CRP') "第 3 次启动：第 2 次扣除后的余额也已持久化（12,345.678899 CRP）"
     $next3 = Wait-ForLine $third $stepLog 60
     $nextStep3 = Get-Step $next3 $stepLog
     Assert-True ($nextStep3 -eq $savedStep2 + 1) "离线 $OfflineSec 秒后，第一个行情步是 $nextStep3，紧接停服前的第 $savedStep2 步（不补算）"

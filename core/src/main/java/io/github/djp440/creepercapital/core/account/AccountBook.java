@@ -17,6 +17,11 @@ public final class AccountBook {
         return book;
     }
 
+    /** 这名玩家是否已有账户（充值过；扣光余额后账户仍在）。 */
+    public boolean hasAccount(UUID player) {
+        return balances.containsKey(player);
+    }
+
     public Money balance(UUID player) {
         return balances.getOrDefault(player, Money.ZERO);
     }

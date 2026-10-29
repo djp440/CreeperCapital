@@ -22,6 +22,18 @@ class AccountBookTest {
     }
 
     @Test
+    @DisplayName("充值后才有账户，扣光余额后账户仍在")
+    void accountExistsAfterFirstDeposit() {
+        AccountBook book = new AccountBook();
+        assertFalse(book.hasAccount(ALICE));
+        book.deposit(ALICE, Money.parse("1"));
+        assertTrue(book.hasAccount(ALICE));
+        book.withdraw(ALICE, Money.parse("1"));
+        assertTrue(book.hasAccount(ALICE));
+        assertFalse(book.hasAccount(BOB));
+    }
+
+    @Test
     @DisplayName("充值累加，各玩家互不影响")
     void depositAccumulates() {
         AccountBook book = new AccountBook();

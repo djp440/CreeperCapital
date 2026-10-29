@@ -1,5 +1,6 @@
 package io.github.djp440.creepercapital.server;
 
+import java.nio.file.Files;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
@@ -10,6 +11,7 @@ import io.github.djp440.creepercapital.network.AccountPayload;
 import io.github.djp440.creepercapital.network.ModPayloads;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
@@ -65,6 +67,16 @@ public final class ServerAccounts {
             changed(server, player);
         }
         return done;
+    }
+
+    /**
+     * 这名玩家是否是本世界已知的：在线、已有账户，或存档里有他的玩家数据（进过服）。
+     * 开发服（离线模式）会把任何名字解析成一个离线 UUID，命令靠这个判断拦下拼错的名字。
+     */
+    public static boolean isKnownPlayer(MinecraftServer server, UUID player) {
+        return server.getPlayerList().getPlayer(player) != null
+                || data().book().hasAccount(player)
+                || Files.isRegularFile(server.getWorldPath(LevelResource.PLAYER_DATA_DIR).resolve(player + ".dat"));
     }
 
     private static void changed(MinecraftServer server, UUID player) {

@@ -86,7 +86,7 @@ public final class CreeperCommand {
 
     /**
      * {@code /creeper dev deposit|withdraw <玩家> <数量>}：给合约账户充值或扣除 CRP。玩家可以是离线的（只要服务器认得这个名字），
-     * 数量按定点数解析（最多 6 位小数），余额不足时拒绝扣除。
+     * 不认识的玩家（没进过这个世界、也没有账户）会报错；数量按定点数解析（最多 6 位小数），余额不足时拒绝扣除。
      */
     private static int adjust(CommandContext<CommandSourceStack> context, boolean deposit) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
@@ -103,6 +103,10 @@ public final class CreeperCommand {
         }
         int done = 0;
         for (NameAndId target : GameProfileArgument.getGameProfiles(context, "player")) {
+            if (!ServerAccounts.isKnownPlayer(source.getServer(), target.id())) {
+                source.sendFailure(Component.translatable("commands.creepercapital.account.unknown_player", target.name()));
+                continue;
+            }
             try {
                 if (deposit) {
                     Money balance = ServerAccounts.deposit(source.getServer(), target.id(), amount);

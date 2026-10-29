@@ -58,6 +58,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.server.players.NameAndId;
 import net.minecraft.util.datafix.DataFixers;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.SavedDataStorage;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
@@ -124,6 +125,13 @@ public final class MarketGameTests {
         function("account_payload_round_trips", MarketGameTests::accountPayloadRoundTrips);
         function("dev_deposit_and_withdraw_are_op_only_and_work_offline", MarketGameTests::devDepositAndWithdrawAreOpOnlyAndWorkOffline);
         function("dev_deposit_and_withdraw_reject_bad_amounts", MarketGameTests::devDepositAndWithdrawRejectBadAmounts);
+        function("dev_deposit_and_withdraw_reject_unknown_players", helper -> {
+            try {
+                devDepositAndWithdrawRejectUnknownPlayers(helper);
+            } catch (CommandSyntaxException e) {
+                throw new IllegalStateException(e);
+            }
+        });
         function("online_player_assets_refresh_immediately", MarketGameTests::onlinePlayerAssetsRefreshImmediately);
         function("accounts_survive_save_and_reload", helper -> {
             try {
@@ -443,11 +451,29 @@ public final class MarketGameTests {
         helper.succeed();
     }
 
-    /** 命令里的玩家名解析成 UUID：先把名字登记进服务端的名字缓存，模拟「曾经进过服、现在离线」的玩家。 */
+    /**
+     * 模拟「曾经进过服、现在离线」的玩家：名字登记进服务端的名字缓存，存档里放一个他的玩家数据文件；
+     * 测试结束要 {@link #forget} 掉这个文件。
+     */
     private static NameAndId offlinePlayer(MinecraftServer server, String name) {
         NameAndId player = new NameAndId(UUID.randomUUID(), name);
         server.services().nameToIdCache().add(player);
+        try {
+            Path dir = server.getWorldPath(LevelResource.PLAYER_DATA_DIR);
+            Files.createDirectories(dir);
+            Files.createFile(dir.resolve(player.id() + ".dat"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         return player;
+    }
+
+    private static void forget(MinecraftServer server, NameAndId player) {
+        try {
+            Files.deleteIfExists(server.getWorldPath(LevelResource.PLAYER_DATA_DIR).resolve(player.id() + ".dat"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** 只有 OP 能用 deposit/withdraw；对离线玩家同样有效；扣除不会超过余额；小数位精确。 */
@@ -456,23 +482,27 @@ public final class MarketGameTests {
         CommandSourceStack op = server.createCommandSourceStack();
         CommandSourceStack regularPlayer = op.withPermission(PermissionSet.NO_PERMISSIONS);
         NameAndId offline = offlinePlayer(server, "OfflineTrader1");
-        helper.assertTrue(server.getPlayerList().getPlayer(offline.id()) == null, "测试玩家应当离线");
+        try {
+            helper.assertTrue(server.getPlayerList().getPlayer(offline.id()) == null, "测试玩家应当离线");
 
-        helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev deposit OfflineTrader1 100"), "普通玩家无权使用 deposit");
-        helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev withdraw OfflineTrader1 1"), "普通玩家无权使用 withdraw");
-        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "普通玩家不应能充值");
+            helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev deposit OfflineTrader1 100"), "普通玩家无权使用 deposit");
+            helper.assertTrue(failsToParse(server, regularPlayer, "creeper dev withdraw OfflineTrader1 1"), "普通玩家无权使用 withdraw");
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "普通玩家不应能充值");
 
-        server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 100.1");
-        server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 0.2");
-        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.3"), "OP 对离线玩家充值（小数无误差）");
+            server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 100.1");
+            server.getCommands().performPrefixedCommand(op, "creeper dev deposit OfflineTrader1 0.2");
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.3"), "OP 对离线玩家充值（小数无误差）");
 
-        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 0.000001");
-        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "扣除最小单位");
+            server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 0.000001");
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "扣除最小单位");
 
-        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.3");
-        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "余额不足时扣除被拒绝，余额不变");
-        server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.299999");
-        helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "恰好扣光");
+            server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.3");
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.parse("100.299999"), "余额不足时扣除被拒绝，余额不变");
+            server.getCommands().performPrefixedCommand(op, "creeper dev withdraw OfflineTrader1 100.299999");
+            helper.assertValueEqual(ServerAccounts.balance(offline.id()), Money.ZERO, "恰好扣光");
+        } finally {
+            forget(server, offline);
+        }
         helper.succeed();
     }
 
@@ -491,7 +521,23 @@ public final class MarketGameTests {
             helper.assertTrue(failsToParse(server, op, "creeper dev deposit OfflineTrader2"), "缺数量应被拒绝");
         } catch (CommandSyntaxException e) {
             throw new IllegalStateException(e);
+        } finally {
+            forget(server, offline);
         }
+        helper.succeed();
+    }
+
+    /** 没进过这个世界、也没有账户的名字（拼错了）：充值、扣除都报错，且不会凭空建出账户。 */
+    private static void devDepositAndWithdrawRejectUnknownPlayers(GameTestHelper helper) throws CommandSyntaxException {
+        MinecraftServer server = helper.getLevel().getServer();
+        CommandSourceStack op = server.createCommandSourceStack();
+        NameAndId stranger = new NameAndId(UUID.randomUUID(), "NeverJoinedGuy");
+        server.services().nameToIdCache().add(stranger);
+        helper.assertValueEqual(server.getCommands().getDispatcher().execute("creeper dev deposit NeverJoinedGuy 5", op), 0,
+                "未知玩家的充值应被拒绝");
+        helper.assertValueEqual(server.getCommands().getDispatcher().execute("creeper dev withdraw NeverJoinedGuy 5", op), 0,
+                "未知玩家的扣除应被拒绝");
+        helper.assertFalse(ServerAccounts.isKnownPlayer(server, stranger.id()), "被拒绝的命令不应建出账户");
         helper.succeed();
     }
 

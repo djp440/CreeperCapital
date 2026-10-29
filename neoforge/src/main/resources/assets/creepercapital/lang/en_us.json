@@ -32,5 +32,6 @@
   "commands.creepercapital.account.withdrawn": "Withdrew from %s: %s CRP, balance %s CRP",
   "commands.creepercapital.account.invalid_amount": "Invalid amount (positive, up to 6 decimals): %s",
   "commands.creepercapital.account.insufficient": "%s has insufficient balance: %s CRP, need %s CRP",
+  "commands.creepercapital.account.unknown_player": "Unknown player: %s (never joined this world and has no account)",
   "commands.creepercapital.account.overflow": "%s would exceed the balance limit"
 }
