@@ -18,8 +18,15 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 evaluationDependsOn(':core')
 def coreMain = project(':core').sourceSets.main
 
+// 开发专用源集（自动截图验收模式）：只并入开发运行的模组，不会打进发布的 jar
+sourceSets {
+    dev
+}
+
 dependencies {
     implementation coreMain.output
+    devImplementation sourceSets.main.output
+    devImplementation coreMain.output
 }
 
 // 开发环境调试日志目录：仓库根目录的 logs/
@@ -27,6 +34,7 @@ def devLogDir = rootProject.file('logs').absolutePath
 
 neoForge {
     version = project.neo_version
+    addModdingDependenciesTo(sourceSets.dev)
 
     runs {
         client {
@@ -46,6 +54,14 @@ neoForge {
             gameDirectory = project.file('runs/gametest')
         }
 
+        // 自动截图验收模式：./gradlew :neoforge:runScreenshots
+        screenshots {
+            client()
+            gameDirectory = project.file('runs/screenshots')
+            systemProperty 'creepercapital.screenshot.dir', rootProject.file('screenshots').absolutePath
+            programArguments.addAll '--width', '1280', '--height', '720'
+        }
+
         configureEach {
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
             systemProperty 'creepercapital.devLogDir', devLogDir
@@ -57,9 +73,25 @@ neoForge {
         "${mod_id}" {
             sourceSet sourceSets.main
             sourceSet coreMain
+            sourceSet sourceSets.dev
         }
     }
 }
+
+// 截图运行前重置环境：删掉上次的测试世界，写入无人值守所需的客户端选项
+def screenshotRunDir = layout.projectDirectory.dir('runs/screenshots')
+def prepareScreenshotRun = tasks.register('prepareScreenshotRun') {
+    doLast {
+        def dir = screenshotRunDir.asFile
+        new File(dir, 'saves').deleteDir()
+        dir.mkdirs()
+        new File(dir, 'options.txt').setText([
+                'lang:zh_cn', 'guiScale:2', 'pauseOnLostFocus:false', 'onboardAccessibility:false',
+                'tutorialStep:none', 'fullscreen:false', 'narrator:0'
+        ].join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+    }
+}
+tasks.matching { it.name == 'runScreenshots' }.configureEach { dependsOn prepareScreenshotRun }
 
 // 一条命令跑完 core 单元测试与 GameTest：./gradlew check
 tasks.named('check') {

@@ -9,7 +9,7 @@ import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 /**
  * 客户端缓存的最新行情，只由服务端同步过来的快照更新；离开服务器时清空。
  */
-final class ClientMarket {
+public final class ClientMarket {
     private static @Nullable MarketSnapshot latest;
     private static @Nullable MarketSnapshot previous;
 
@@ -26,7 +26,7 @@ final class ClientMarket {
         previous = null;
     }
 
-    static Optional<MarketSnapshot> latest() {
+    public static Optional<MarketSnapshot> latest() {
         return Optional.ofNullable(latest);
     }
 

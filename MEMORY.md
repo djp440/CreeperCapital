@@ -18,3 +18,10 @@
 - 界面渲染改为 `GuiGraphicsExtractor` 配合 `extractRenderState` / `extractBackground`。
 - 按键分类是 `KeyMapping.Category(Identifier)`，要在 `RegisterKeyMappingsEvent` 里 `registerCategory`；按键事件类是 `net.minecraft.client.input.KeyEvent`。
 - GameTest 的函数注册在 `Registries.TEST_FUNCTION`，再在 `RegisterGameTestsEvent` 里注册环境和测试，写法见 `MarketGameTests`。
+
+## 2026-10-29 10:20 自动截图验收模式的结构
+
+- 代码在 `neoforge/src/dev`（独立 `dev` 源集），只通过 `neoForge.mods` 并入开发运行，不进发布 jar；入口是与主类同 modId 的第二个 `@Mod(dist = CLIENT)`，靠系统属性 `creepercapital.screenshot.dir` 才激活。
+- `runScreenshots` 依赖 `prepareScreenshotRun`：每次删除测试世界并重写 `runs/screenshots/options.txt`（中文、`pauseOnLostFocus:false`、跳过无障碍引导），否则无人值守会卡在弹窗或失去焦点暂停。
+- dev 代码要访问的客户端类需是 public（`ClientMarket`、`TradingScreen.open()`），这是为开发工具放宽可见性的已知代价。
+- 失败（超时、保存出错）用 `Runtime.halt(1)` 以非零退出码结束，让 Gradle 命令失败。
