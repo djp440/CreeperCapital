@@ -166,5 +166,11 @@
   "message.creepercapital.order.take_profit_filled": "Take-profit triggered, closed %1$s %2$s @ %3$s, PnL %5$s",
   "message.creepercapital.order.stop_loss_filled": "Stop-loss triggered, closed %1$s %2$s @ %3$s, PnL %5$s",
   "commands.creepercapital.pool.funded": "Funded the liquidity pool with %s CRP, pool balance %s CRP",
-  "commands.creepercapital.pool.overflow": "The pool balance would exceed the limit"
+  "commands.creepercapital.pool.overflow": "The pool balance would exceed the limit",
+  "message.creepercapital.offline_summary.header": "While you were offline, your contract account had these events:",
+  "message.creepercapital.offline_summary.liquidation": "Liquidation: %1$s position(s), realized PnL total %2$s CRP",
+  "message.creepercapital.offline_summary.funding": "Funding: %1$s settlement(s), net %2$s CRP",
+  "message.creepercapital.offline_summary.order_fill": "Order fills: %1$s, turnover %2$s CRP",
+  "message.creepercapital.offline_summary.trigger": "Take-profit/stop-loss triggered: %1$s, realized PnL total %2$s CRP",
+  "message.creepercapital.offline_summary.footer": "See the history tabs for details: Trade History, Funding History, Order History."
 }

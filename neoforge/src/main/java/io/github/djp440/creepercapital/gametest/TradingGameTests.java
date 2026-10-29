@@ -97,6 +97,7 @@ final class TradingGameTests {
         FundingGameTests.register(function);
         ProtectionGameTests.register(function);
         LiquidationGameTests.register(function);
+        OfflineSummaryGameTests.register(function);
         function.accept("contract_config_reads_trading_parameters", helper -> {
             try {
                 contractConfigReadsTradingParameters(helper);
