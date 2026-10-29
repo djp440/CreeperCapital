@@ -21,6 +21,7 @@ import io.github.djp440.creepercapital.network.OrderPayload;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 
@@ -40,11 +41,11 @@ import net.minecraft.util.FormattedCharSequence;
 final class OrderPanel {
     /** 只用来给输入框定初始宽度；面板实际宽度由 {@link TradingLayout} 按屏幕算，输入框每帧按它重设宽度。 */
     private static final int WIDTH = 168;
-    private static final int PAD = 8;
-    private static final int ROW = 12;
+    private static final int PAD = OrderPanelLayout.PAD;
+    private static final int ROW = OrderPanelLayout.ROW;
     private static final int BUTTON_HEIGHT = 18;
-    private static final int STEP_BUTTON = 14;
-    private static final int INPUT_HEIGHT = 16;
+    private static final int STEP_BUTTON = OrderPanelLayout.STEP_BUTTON;
+    private static final int INPUT_HEIGHT = OrderPanelLayout.INPUT_HEIGHT;
     private static final int BUTTON_BACKGROUND = TradingPalette.BUTTON;
     private static final int BUTTON_HOVER = TradingPalette.BUTTON_HOVER;
     private static final int INPUT_BACKGROUND = TradingPalette.BACKGROUND;
@@ -71,6 +72,11 @@ final class OrderPanel {
     private int[] sourceBox = new int[4];
     private int[] reduceBox = new int[4];
     private int[] protectBox = new int[4];
+    /** 上一帧画出来的输入框区域；点击判定读它，和绘制同源（#39）。 */
+    private OrderPanelLayout.Fields fields = new OrderPanelLayout.Fields(TradingLayout.Rect.EMPTY, TradingLayout.Rect.EMPTY,
+            TradingLayout.Rect.EMPTY, TradingLayout.Rect.EMPTY, 0, 0);
+    private int priceUnitWidth;
+    private int quantityUnitWidth;
 
     OrderPanel(Font font) {
         this.font = font;
@@ -97,6 +103,47 @@ final class OrderPanel {
         box.setFilter(text -> text.chars().allMatch(c -> (c >= '0' && c <= '9') || c == '.'));
         box.setHint(Component.translatable(key));
         return box;
+    }
+
+    /**
+     * 点击落在某个输入框画出来的区域里（含内边距和右侧单位文字）就由这里处理：把点击坐标夹回输入框的文字区域再交给它定位光标。
+     * 原版 {@code EditBox} 只认文字区域内的点击，点在边距或单位文字上会落空。
+     *
+     * @return 被点中的输入框；没点在任何输入框上返回 {@code null}
+     */
+    @Nullable
+    EditBox mouseClickedInput(MouseButtonEvent event, boolean doubleClick) {
+        OrderPanelLayout.Input input = fields.hitTest(event.x(), event.y());
+        if (input == null) {
+            return null;
+        }
+        EditBox box;
+        TradingLayout.Rect field;
+        int unitWidth = 0;
+        switch (input) {
+            case PRICE -> {
+                box = priceBox;
+                field = fields.price();
+                unitWidth = priceUnitWidth;
+            }
+            case QUANTITY -> {
+                box = quantityBox;
+                field = fields.quantity();
+                unitWidth = quantityUnitWidth;
+            }
+            case TAKE_PROFIT -> {
+                box = takeProfitBox;
+                field = fields.takeProfit();
+            }
+            default -> {
+                box = stopLossBox;
+                field = fields.stopLoss();
+            }
+        }
+        TradingLayout.Rect text = OrderPanelLayout.textArea(field, unitWidth);
+        MouseButtonEvent inside = new MouseButtonEvent(OrderPanelLayout.clampX(text, event.x()),
+                OrderPanelLayout.clampY(text, event.y()), event.buttonInfo());
+        return box.mouseClicked(inside, doubleClick) ? box : null;
     }
 
     boolean anyInputFocused() {
@@ -154,6 +201,9 @@ final class OrderPanel {
         int y = top + 6;
 
         boolean limit = ClientTrading.limitMode();
+        boolean protectionPage = ClientTrading.protectionPage();
+        // 输入框画在哪里由 OrderPanelLayout 算，点击判定也读这份结果，保证画出来的和点得到的一致
+        fields = OrderPanelLayout.compute(new TradingLayout.Rect(left, top, right, bottom), limit, protectionPage);
         // 市价模式下委托价输入框不画，也不能接收点击
         priceBox.visible = limit;
         priceBox.active = limit;
@@ -193,33 +243,32 @@ final class OrderPanel {
 
         // 委托价（限价）：输入框右侧标出 CRP 作单位
         if (limit) {
+            TradingLayout.Rect field = fields.price();
+            y = field.top();
             graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
             graphics.outline(x, y, width, INPUT_HEIGHT, priceBox.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
             int crpWidth = font.width("CRP");
             graphics.text(font, "CRP", x + width - 4 - crpWidth, y + (INPUT_HEIGHT - font.lineHeight) / 2 + 1,
                     TradingPalette.TEXT_SECONDARY, false);
-            priceBox.setWidth(width - 12 - crpWidth);
-            priceBox.setX(x + 4);
-            priceBox.setY(y + 4);
+            placeBox(priceBox, field, crpWidth);
+            priceUnitWidth = crpWidth;
             priceBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
-            y += INPUT_HEIGHT + 5;
         }
 
         // 数量：输入框右侧标出标的资源的名称作单位
         String unit = underlyingName(symbol);
+        y = fields.quantity().top();
         graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
         graphics.outline(x, y, width, INPUT_HEIGHT, quantityBox.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
         int unitWidth = font.width(unit);
         graphics.text(font, unit, x + width - 4 - unitWidth, y + (INPUT_HEIGHT - font.lineHeight) / 2 + 1,
                 TradingPalette.TEXT_SECONDARY, false);
-        quantityBox.setWidth(width - 12 - unitWidth);
-        quantityBox.setX(x + 4);
-        quantityBox.setY(y + 4);
+        placeBox(quantityBox, fields.quantity(), unitWidth);
+        quantityUnitWidth = unitWidth;
         quantityBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        y += INPUT_HEIGHT + 5;
+        y = fields.tabsY();
 
         // 预估页 / 止盈止损页共用同一块区域（面板高度很紧）
-        boolean protectionPage = ClientTrading.protectionPage();
         takeProfitBox.visible = protectionPage;
         takeProfitBox.active = protectionPage;
         stopLossBox.visible = protectionPage;
@@ -377,10 +426,10 @@ final class OrderPanel {
     /** 止盈止损页：止盈价、止损价并排两个输入框；其下是触发价来源开关和只减仓开关。 */
     private int extractProtection(GuiGraphicsExtractor graphics, int x, int width, int y, int mouseX, int mouseY,
             float partialTick) {
-        int gap = 6;
+        int gap = OrderPanelLayout.FIELD_GAP;
         int half = (width - gap) / 2;
-        triggerField(graphics, takeProfitBox, x, y, half, mouseX, mouseY, partialTick);
-        triggerField(graphics, stopLossBox, x + half + gap, y, width - half - gap, mouseX, mouseY, partialTick);
+        triggerField(graphics, takeProfitBox, fields.takeProfit(), mouseX, mouseY, partialTick);
+        triggerField(graphics, stopLossBox, fields.stopLoss(), mouseX, mouseY, partialTick);
         y += INPUT_HEIGHT + 3;
         sourceBox =new int[] {x, y, x + half, y + STEP_BUTTON};
         reduceBox = new int[] {x + half + gap, y, x + width, y + STEP_BUTTON};
@@ -402,14 +451,21 @@ final class OrderPanel {
         return y + STEP_BUTTON + 3;
     }
 
-    private void triggerField(GuiGraphicsExtractor graphics, EditBox box, int x, int y, int width, int mouseX, int mouseY,
+    private void triggerField(GuiGraphicsExtractor graphics, EditBox box, TradingLayout.Rect field, int mouseX, int mouseY,
             float partialTick) {
-        graphics.fill(x, y, x + width, y + INPUT_HEIGHT, INPUT_BACKGROUND);
-        graphics.outline(x, y, width, INPUT_HEIGHT, box.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
-        box.setWidth(width - 8);
-        box.setX(x + 4);
-        box.setY(y + 4);
+        graphics.fill(field.left(), field.top(), field.right(), field.bottom(), INPUT_BACKGROUND);
+        graphics.outline(field.left(), field.top(), field.width(), field.height(),
+                box.isFocused() ? TradingPalette.BRAND_YELLOW : TradingPalette.DIVIDER);
+        placeBox(box, field, 0);
         box.extractRenderState(graphics, mouseX, mouseY, partialTick);
+    }
+
+    /** 把输入框本体摆到画出来的区域里的文字区域（见 {@link OrderPanelLayout#textArea}）。 */
+    private static void placeBox(EditBox box, TradingLayout.Rect field, int unitWidth) {
+        TradingLayout.Rect text = OrderPanelLayout.textArea(field, unitWidth);
+        box.setWidth(text.width());
+        box.setX(text.left());
+        box.setY(text.top());
     }
 
     /** 「止盈止损」页签的文字：设了止盈止损或只减仓时末尾带一个黄点，提示这一页有设置。 */

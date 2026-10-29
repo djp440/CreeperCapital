@@ -96,6 +96,110 @@ class TradingLayoutTest {
         assertEquals(List.of(), check("320x240", 320, 240, TradingLayout.compute(320, 240, 1)));
     }
 
+    /** #39：输入框的命中区域必须和绘制出来的输入框一致（含框内边距与右侧单位文字），在整个「窗口 × GUI 缩放」矩阵下成立。 */
+    @Test
+    void inputFieldsAreClickableOverTheirWholeDrawnArea() {
+        List<String> problems = new ArrayList<>();
+        for (int[] window : WINDOWS) {
+            for (int guiScale : GUI_SCALES) {
+                int[] gui = guiSize(window[0], window[1], guiScale);
+                for (int rows = 1; rows <= TradingLayout.maxTickerRows(gui[1]); rows++) {
+                    Rect panel = TradingLayout.compute(gui[0], gui[1], rows).orderPanel();
+                    for (boolean limit : new boolean[] {false, true}) {
+                        for (boolean protection : new boolean[] {false, true}) {
+                            String name = window[0] + "x" + window[1] + " scale " + guiScale + " rows " + rows + " limit " + limit
+                                    + " protection " + protection;
+                            problems.addAll(checkFields(name, panel, OrderPanelLayout.compute(panel, limit, protection), limit, protection));
+                        }
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), problems);
+    }
+
+    @Test
+    void inputFieldsFollowTheOrderPanelPageState() {
+        Rect panel = TradingLayout.compute(640, 360, 2).orderPanel();
+        OrderPanelLayout.Fields market = OrderPanelLayout.compute(panel, false, false);
+        assertTrue(market.price().isEmpty());
+        assertTrue(market.takeProfit().isEmpty());
+        assertTrue(market.stopLoss().isEmpty());
+        assertFalse(market.quantity().isEmpty());
+
+        OrderPanelLayout.Fields limitProtection = OrderPanelLayout.compute(panel, true, true);
+        assertFalse(limitProtection.price().isEmpty());
+        assertFalse(limitProtection.takeProfit().isEmpty());
+        assertFalse(limitProtection.stopLoss().isEmpty());
+        // 限价多一行委托价，数量输入框随之下移
+        assertTrue(limitProtection.quantity().top() > market.quantity().top());
+    }
+
+    @Test
+    void clickInTheUnitLabelOrPaddingStillFocusesTheFieldAndLandsInsideItsTextArea() {
+        Rect panel = TradingLayout.compute(640, 360, 2).orderPanel();
+        OrderPanelLayout.Fields fields = OrderPanelLayout.compute(panel, true, false);
+        Rect quantity = fields.quantity();
+        // 右侧单位文字所在的位置、上边距、左边距都算点中数量输入框
+        assertEquals(OrderPanelLayout.Input.QUANTITY, fields.hitTest(quantity.right() - 2, quantity.top() + 8));
+        assertEquals(OrderPanelLayout.Input.QUANTITY, fields.hitTest(quantity.left(), quantity.top()));
+        assertEquals(OrderPanelLayout.Input.QUANTITY, fields.hitTest(quantity.left() + 20, quantity.bottom() - 1));
+        // 框外不算
+        assertEquals(null, fields.hitTest(quantity.right(), quantity.top() + 8));
+        assertEquals(null, fields.hitTest(quantity.left() + 20, quantity.bottom()));
+        // 点击落在单位文字上时，交给输入框的坐标被夹回文字区域内，光标落在文字末尾
+        Rect text = OrderPanelLayout.textArea(quantity, 30);
+        assertEquals(text.right() - 1, OrderPanelLayout.clampX(text, quantity.right() - 2));
+        assertEquals(text.left(), OrderPanelLayout.clampX(text, quantity.left()));
+        assertEquals(text.top(), OrderPanelLayout.clampY(text, quantity.top()));
+        assertEquals(text.bottom() - 1, OrderPanelLayout.clampY(text, quantity.bottom() - 1));
+    }
+
+    private static List<String> checkFields(String name, Rect panel, OrderPanelLayout.Fields fields, boolean limit, boolean protection) {
+        List<String> problems = new ArrayList<>();
+        Map<OrderPanelLayout.Input, Rect> expected = new LinkedHashMap<>();
+        expected.put(OrderPanelLayout.Input.PRICE, fields.price());
+        expected.put(OrderPanelLayout.Input.QUANTITY, fields.quantity());
+        expected.put(OrderPanelLayout.Input.TAKE_PROFIT, fields.takeProfit());
+        expected.put(OrderPanelLayout.Input.STOP_LOSS, fields.stopLoss());
+        if (fields.price().isEmpty() == limit) {
+            problems.add(name + "：委托价输入框只在限价模式出现");
+        }
+        if (fields.takeProfit().isEmpty() == protection || fields.stopLoss().isEmpty() == protection) {
+            problems.add(name + "：止盈止损输入框只在止盈止损页出现");
+        }
+        for (Map.Entry<OrderPanelLayout.Input, Rect> entry : expected.entrySet()) {
+            Rect field = entry.getValue();
+            if (field.isEmpty()) {
+                continue;
+            }
+            if (field.left() < panel.left() || field.top() < panel.top() || field.right() > panel.right() || field.bottom() > panel.bottom()) {
+                problems.add(name + "：" + entry.getKey() + " 超出下单面板 " + field + " / " + panel);
+            }
+            Rect text = OrderPanelLayout.textArea(field, entry.getKey() == OrderPanelLayout.Input.QUANTITY ? 40 : 0);
+            if (text.isEmpty() || text.left() < field.left() || text.right() > field.right() || text.top() < field.top()
+                    || text.bottom() > field.bottom()) {
+                problems.add(name + "：" + entry.getKey() + " 文字区域不在输入框内 " + text + " / " + field);
+            }
+        }
+        // 逐像素：面板范围内每个点的命中结果必须正好等于「画着哪个输入框」
+        for (int x = panel.left(); x < panel.right(); x++) {
+            for (int y = panel.top(); y < panel.bottom(); y++) {
+                OrderPanelLayout.Input drawn = null;
+                for (Map.Entry<OrderPanelLayout.Input, Rect> entry : expected.entrySet()) {
+                    if (entry.getValue().contains(x, y)) {
+                        drawn = entry.getKey();
+                    }
+                }
+                if (fields.hitTest(x, y) != drawn) {
+                    problems.add(name + "：(" + x + "," + y + ") 命中 " + fields.hitTest(x, y) + "，绘制 " + drawn);
+                    return problems;
+                }
+            }
+        }
+        return problems;
+    }
+
     private static List<String> check(String name, int width, int height, Layout layout) {
         List<String> problems = new ArrayList<>();
         Map<String, Rect> regions = new LinkedHashMap<>();

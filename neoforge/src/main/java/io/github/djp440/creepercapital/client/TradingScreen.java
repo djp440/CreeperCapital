@@ -11,6 +11,7 @@ import io.github.djp440.creepercapital.core.kline.CandlePeriod;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -208,13 +209,23 @@ public final class TradingScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0 && clickedContractControls(event.x(), event.y())) {
-            orderPanel.unfocusInputs();
+            clearInputFocus();
             return true;
         }
         if (event.button() == 0) {
+            // 输入框按「画出来的区域」判定点击，且先于各处登记的点击区域，不会被它们抢走（#39）
+            EditBox input = orderPanel.mouseClickedInput(event, doubleClick);
+            if (input != null) {
+                // 先把界面记着的焦点清掉：别处点击清焦点时若只清了输入框自己的标记，界面仍记着它，
+                // 再点同一个输入框时 setFocused 会因为「焦点没变」而不重新聚焦
+                setFocused(null);
+                setFocused(input);
+                setDragging(true);
+                return true;
+            }
             String symbol = ClientMarket.selectedSymbol().orElse(null);
             if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
-                orderPanel.unfocusInputs();
+                clearInputFocus();
                 return true;
             }
             for (Hit hit : List.copyOf(hits)) {
@@ -228,6 +239,12 @@ public final class TradingScreen extends Screen {
             }
         }
         return super.mouseClicked(event, doubleClick);
+    }
+
+    /** 清掉所有输入框的焦点，同时清掉界面自己记的焦点子部件，两边保持一致。 */
+    private void clearInputFocus() {
+        orderPanel.unfocusInputs();
+        setFocused(null);
     }
 
     /** 点在交易代码按钮上就展开/收起合约列表；列表展开时点列表项切换合约，点别处只收起列表。返回是否已处理这次点击。 */
