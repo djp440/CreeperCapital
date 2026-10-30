@@ -5,12 +5,18 @@ import java.util.List;
 
 import org.lwjgl.glfw.GLFW;
 
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
+
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -69,7 +75,7 @@ public final class TradingScreen extends Screen {
     }
 
     /** 一个可点击的区域（页签、切换按钮等），每帧渲染时重新登记。 */
-    private record Hit(int left, int top, int right, int bottom, Runnable action) {
+    private record Hit(int left, int top, int right, int bottom, Cue cue, Runnable action) {
         boolean contains(double x, double y) {
             return x >= left && x < right && y >= top && y < bottom;
         }
@@ -92,6 +98,12 @@ public final class TradingScreen extends Screen {
     private boolean chartShowsColumn;
     /** 上一帧的布局，滚轮判定要用。 */
     private TradingLayout.Layout layout;
+    /** 上一帧行情栏用了几行（拖拽时重算布局要用）。 */
+    private int tickerRows = 1;
+    /** 正在被拖拽的边框（鼠标按下到松开之间）；没有拖拽时为空。 */
+    private TradingLayout.Seam draggingSeam;
+    /** 拖拽期间的区域比例（松开才写回客户端配置，免得每帧写文件）；没有拖拽时为空。 */
+    private TradingLayout.Ratios dragRatios;
     private final List<Hit> hits = new ArrayList<>();
     /** 交易代码按钮（点开合约列表）的区域；每帧渲染时更新。 */
     private TradingLayout.Rect symbolButton = TradingLayout.Rect.EMPTY;
@@ -154,6 +166,38 @@ public final class TradingScreen extends Screen {
         }
     }
 
+    /** 开发用（自动截图）：打开交易界面，图表带着指定的缩放（每根 K 线的像素宽）和平移（往回看多少根）；{@code edgeSide} 非 0 时显示到头反馈。 */
+    public static void openWithChartView(double slotWidth, double offset, int edgeSide) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devSetView(new ChartViewport(slotWidth, offset), edgeSide);
+        }
+    }
+
+    /** 开发用（自动截图）：打开交易界面并展开图表的指标设置浮层，可同时展开某一行的色盘、在某一行输入框里填一段文字。 */
+    public static void openWithIndicatorSettings(int paletteRow, int typedRow, String typedText) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devOpenSettings(paletteRow, typedRow, typedText);
+        }
+    }
+
+    /** 开发用（自动截图）：打开交易界面，图表上从持仓线拖出一条触发价 = 最新价格 × {@code factor} 的止盈止损线（{@code dragging} 为 false 时是松开后的 ✓ / ✕ 确认态）。 */
+    public static void openWithChartEdit(double factor, boolean dragging) {
+        open();
+        if (Minecraft.getInstance().screen instanceof TradingScreen screen) {
+            screen.chart.devEdit(factor, dragging);
+        }
+    }
+
+    /** 开发用（自动截图）：打开交易界面，并把当前合约最早挂出的那张当前委托标成「撤销中」（不真的发撤单）。 */
+    public static void openWithChartCancelling() {
+        open();
+        ClientMarket.selectedSymbol().ifPresent(symbol -> ClientTrading.openOrdersNewestFirst().stream()
+                .filter(order -> order.symbol().equals(symbol)).reduce((newer, older) -> older)
+                .ifPresent(order -> ChartOrderActions.devMarkCancelling(order.id())));
+    }
+
     /** 开发用（自动截图）：打开交易界面并展开合约下拉列表。 */
     public static void openWithContractMenu() {
         open();
@@ -170,6 +214,8 @@ public final class TradingScreen extends Screen {
         addWidget(orderPanel.priceBox());
         addWidget(orderPanel.takeProfitBox());
         addWidget(orderPanel.stopLossBox());
+        // 图表指标设置浮层里的周期输入框：同样由浮层自己渲染
+        chart.inputs().forEach(this::addWidget);
     }
 
     /** 单人游戏里打开交易界面不暂停游戏，市场照常推进。 */
@@ -185,8 +231,19 @@ public final class TradingScreen extends Screen {
             contractMenuOpen = false;
             return true;
         }
-        if (orderPanel.anyInputFocused() && event.key() != GLFW.GLFW_KEY_ESCAPE) {
-            // 在数量 / 委托价 / 止盈止损价输入框里打字时，快捷键字母不能关掉界面
+        if (event.key() == GLFW.GLFW_KEY_ESCAPE && chart.cancelEdit()) {
+            return true; // Esc 先取消图上正在拖 / 等确认的止盈止损，不关界面
+        }
+        if (chart.settingsOpen() && event.key() == GLFW.GLFW_KEY_ESCAPE) {
+            chart.closeSettings();
+            setFocused(null);
+            return true;
+        }
+        if ((orderPanel.anyInputFocused() || chart.anyInputFocused()) && event.key() != GLFW.GLFW_KEY_ESCAPE) {
+            // 在数量 / 委托价 / 止盈止损价 / 均线周期输入框里打字时，快捷键字母不能关掉界面
+            if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
+                CuePlayer.play(Cue.INPUT_CONFIRM);
+            }
             return super.keyPressed(event);
         }
         if (CreeperCapitalClient.OPEN_TRADING_KEY.matches(event)) {
@@ -198,6 +255,9 @@ public final class TradingScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+        if (chart.mouseScrolled(x, y, scrollY)) {
+            return true;
+        }
         if (layout != null && layout.table().contains(x, y)) {
             tables.mouseScrolled(scrollY);
             return true;
@@ -208,17 +268,47 @@ public final class TradingScreen extends Screen {
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0 && clickedContractControls(event.x(), event.y())) {
-            orderPanel.unfocusInputs();
+            clearInputFocus();
+            return true;
+        }
+        if (event.button() == 0 && layout != null) {
+            TradingLayout.Seam seam = TradingLayout.seamAt(layout, event.x(), event.y());
+            if (seam != null) {
+                draggingSeam = seam;
+                dragRatios = layoutRatios();
+                return true;
+            }
+        }
+        EditBox chartInput = chart.mouseClickedInput(event, doubleClick);
+        if (chartInput != null) {
+            setFocused(null);
+            setFocused(chartInput);
+            setDragging(true);
+            return true;
+        }
+        if (chart.mouseClicked(event.x(), event.y(), event.button(), doubleClick)) {
+            clearInputFocus();
             return true;
         }
         if (event.button() == 0) {
+            // 输入框按「画出来的区域」判定点击，且先于各处登记的点击区域，不会被它们抢走（#39）
+            EditBox input = orderPanel.mouseClickedInput(event, doubleClick);
+            if (input != null) {
+                // 先把界面记着的焦点清掉：别处点击清焦点时若只清了输入框自己的标记，界面仍记着它，
+                // 再点同一个输入框时 setFocused 会因为「焦点没变」而不重新聚焦
+                setFocused(null);
+                setFocused(input);
+                setDragging(true);
+                return true;
+            }
             String symbol = ClientMarket.selectedSymbol().orElse(null);
             if (symbol != null && orderPanel.mouseClicked(event.x(), event.y(), symbol)) {
-                orderPanel.unfocusInputs();
+                clearInputFocus();
                 return true;
             }
             for (Hit hit : List.copyOf(hits)) {
                 if (hit.contains(event.x(), event.y())) {
+                    CuePlayer.play(hit.cue());
                     hit.action().run();
                     return true;
                 }
@@ -230,10 +320,49 @@ public final class TradingScreen extends Screen {
         return super.mouseClicked(event, doubleClick);
     }
 
+    /** 拖拽边框：边框中心跟着鼠标，比例受各区域最小尺寸约束。 */
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+        if (event.button() == 0 && chart.isDragging()) {
+            return chart.mouseDragged(event.y(), dx);
+        }
+        if (draggingSeam != null && event.button() == 0) {
+            dragRatios = TradingLayout.dragged(width, height, tickerRows, dragRatios, draggingSeam, event.x(), event.y());
+            return true;
+        }
+        return super.mouseDragged(event, dx, dy);
+    }
+
+    /** 松开鼠标结束拖拽，把比例写回客户端配置。 */
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (chart.mouseReleased(event.button())) {
+            return true;
+        }
+        if (draggingSeam != null && event.button() == 0) {
+            TradingLayout.Ratios ratios = dragRatios;
+            draggingSeam = null;
+            dragRatios = null;
+            if (ratios != null) {
+                ClientConfig.setLayoutRatios(ratios);
+            }
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    /** 清掉所有输入框的焦点，同时清掉界面自己记的焦点子部件，两边保持一致。 */
+    private void clearInputFocus() {
+        orderPanel.unfocusInputs();
+        chart.unfocusInputs();
+        setFocused(null);
+    }
+
     /** 点在交易代码按钮上就展开/收起合约列表；列表展开时点列表项切换合约，点别处只收起列表。返回是否已处理这次点击。 */
     private boolean clickedContractControls(double x, double y) {
         List<String> symbols = ClientMarket.symbols();
         if (symbols.size() > 1 && symbolButton.contains(x, y)) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             contractMenuOpen = !contractMenuOpen;
             return true;
         }
@@ -242,6 +371,7 @@ public final class TradingScreen extends Screen {
         }
         int index = menuIndexAt(symbols, x, y);
         if (index >= 0) {
+            CuePlayer.play(Cue.BUTTON_CLICK);
             ClientMarket.select(symbols.get(index));
         }
         contractMenuOpen = false;
@@ -251,7 +381,7 @@ public final class TradingScreen extends Screen {
     private int menuWidth(List<String> symbols) {
         int widest = 0;
         for (String symbol : symbols) {
-            widest = Math.max(widest, font.width(symbol));
+            widest = Math.max(widest, font.width(ContractSpec.displaySymbol(symbol)));
         }
         return widest + MENU_PADDING * 2;
     }
@@ -277,17 +407,18 @@ public final class TradingScreen extends Screen {
         hits.clear();
         MarketSnapshot snapshot = ClientMarket.latest().orElse(null);
         if (snapshot == null) {
-            layout = TradingLayout.compute(width, height, 1);
-            extractHeader(graphics);
+            layout = TradingLayout.compute(width, height, 1, layoutRatios());
+            extractHeader(graphics, mouseX, mouseY);
             graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.waiting"), width / 2,
                     GuiText.centeredY(font, 0, height), TradingPalette.TEXT_SECONDARY);
             return;
         }
         TickerPlan ticker = planTicker(snapshot);
-        layout = TradingLayout.compute(width, height, ticker.rows());
-        extractHeader(graphics);
+        tickerRows = ticker.rows();
+        layout = TradingLayout.compute(width, height, tickerRows, layoutRatios());
+        extractHeader(graphics, mouseX, mouseY);
         extractTicker(graphics, snapshot, ticker, mouseX, mouseY);
-        extractChartCard(graphics, snapshot, mouseX, mouseY);
+        extractChartCard(graphics, snapshot, mouseX, mouseY, partialTick);
         if (layout.columnMode() == TradingLayout.ColumnMode.SIDE) {
             TradingLayout.Rect column = layout.marketColumn();
             graphics.enableScissor(column.left(), column.top(), column.right(), column.bottom());
@@ -302,9 +433,30 @@ public final class TradingScreen extends Screen {
                 mouseX, mouseY, partialTick);
         graphics.disableScissor();
         extractTable(graphics, mouseX, mouseY);
+        extractSeams(graphics, mouseX, mouseY);
         if (contractMenuOpen) {
             extractContractMenu(graphics, snapshot.symbol(), mouseX, mouseY);
         }
+    }
+
+    /** 当前生效的区域比例：拖拽中用拖拽的值，否则读客户端配置。 */
+    private TradingLayout.Ratios layoutRatios() {
+        return dragRatios != null ? dragRatios : ClientConfig.layoutRatios();
+    }
+
+    /** 可拖拽边框的提示：鼠标悬停（或正在拖拽）时边框高亮，光标变成调整大小的样子。 */
+    private void extractSeams(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        TradingLayout.Seam seam = draggingSeam != null ? draggingSeam : TradingLayout.seamAt(layout, mouseX, mouseY);
+        if (seam == null) {
+            return;
+        }
+        TradingLayout.Rect strip = TradingLayout.seam(layout, seam);
+        if (strip.isEmpty()) {
+            return;
+        }
+        graphics.fill(strip.left(), strip.top(), strip.right(), strip.bottom(),
+                draggingSeam != null ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_SECONDARY);
+        graphics.requestCursor(seam == TradingLayout.Seam.TABLE ? CursorTypes.RESIZE_NS : CursorTypes.RESIZE_EW);
     }
 
     /** 合约下拉列表：挂在交易代码按钮下方，盖在图表之上，当前合约黄字，鼠标悬停的一项底色变亮。 */
@@ -325,12 +477,12 @@ public final class TradingScreen extends Screen {
             String symbol = symbols.get(i);
             int color = symbol.equals(current) ? TradingPalette.BRAND_YELLOW
                     : i == hovered ? TradingPalette.TEXT_PRIMARY : TradingPalette.TEXT_SECONDARY;
-            graphics.text(font, symbol, left + MENU_PADDING, GuiText.centeredY(font, rowTop, rowTop + MENU_ROW_HEIGHT), color, false);
+            graphics.text(font, ContractSpec.displaySymbol(symbol), left + MENU_PADDING, GuiText.centeredY(font, rowTop, rowTop + MENU_ROW_HEIGHT), color, false);
         }
     }
 
-    /** 标题栏（矮屏时省掉）：品牌黄的模组名。 */
-    private void extractHeader(GuiGraphicsExtractor graphics) {
+    /** 标题栏（矮屏时省掉）：品牌黄的模组名，右端是「恢复默认布局」按钮（布局还是缺省时灰掉）。 */
+    private void extractHeader(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
         TradingLayout.Rect header = layout.header();
         if (header.isEmpty()) {
             return;
@@ -338,12 +490,31 @@ public final class TradingScreen extends Screen {
         graphics.fill(header.left(), header.top(), header.right(), header.bottom(), TradingPalette.PANEL);
         graphics.text(font, title, TradingLayout.GAP + PAD, GuiText.centeredY(font, header.top(), header.bottom()),
                 TradingPalette.BRAND_YELLOW, false);
+        Component label = Component.translatable("screen.creepercapital.trading.reset_layout");
+        int buttonWidth = font.width(label) + TOGGLE_PADDING * 2;
+        int left = header.right() - TradingLayout.GAP - PAD - buttonWidth;
+        boolean enabled = !layoutRatios().isDefault();
+        Hit hit = new Hit(left, header.top() + 1, left + buttonWidth, header.bottom() - 1, Cue.BUTTON_CLICK, this::resetLayout);
+        graphics.fill(hit.left(), hit.top(), hit.right(), hit.bottom(),
+                enabled && hit.contains(mouseX, mouseY) ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
+        graphics.text(font, label, left + TOGGLE_PADDING, GuiText.centeredY(font, hit.top(), hit.bottom()),
+                enabled ? TradingPalette.TEXT_PRIMARY : TradingPalette.DISABLED, false);
+        if (enabled) {
+            hits.add(hit);
+        }
+    }
+
+    /** 恢复默认布局：清掉保存的区域比例。 */
+    private void resetLayout() {
+        dragRatios = null;
+        draggingSeam = null;
+        ClientConfig.setLayoutRatios(TradingLayout.Ratios.DEFAULT);
     }
 
     /** 行情栏各项的排版：交易代码块之后依次排，放不下折行，超过行数上限时丢掉优先级低的项。 */
     private TickerPlan planTicker(MarketSnapshot snapshot) {
         List<Stat> stats = stats(snapshot);
-        int symbolWidth = Math.max(font.width(snapshot.symbol()) + caretSpace(),
+        int symbolWidth = Math.max(font.width(ContractSpec.displaySymbol(snapshot.symbol())) + caretSpace(),
                 font.width(Component.translatable("screen.creepercapital.trading.perpetual")));
         int toggleWidth = toggleWidth();
         int left = TradingLayout.GAP + PAD;
@@ -382,10 +553,10 @@ public final class TradingScreen extends Screen {
             graphics.fill(symbolButton.left(), symbolButton.top(), symbolButton.right(), symbolButton.bottom(), TradingPalette.HOVER);
         }
         int upperY = card.top() + upperOffset;
-        graphics.text(font, snapshot.symbol(), left, upperY, TradingPalette.TEXT_PRIMARY, false);
+        graphics.text(font, ContractSpec.displaySymbol(snapshot.symbol()), left, upperY, TradingPalette.TEXT_PRIMARY, false);
         if (switchable) {
             int caretColor = contractMenuOpen ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_SECONDARY;
-            int caretCenter = left + font.width(snapshot.symbol()) + CARET_GAP + CARET_HALF_WIDTH;
+            int caretCenter = left + font.width(ContractSpec.displaySymbol(snapshot.symbol())) + CARET_GAP + CARET_HALF_WIDTH;
             for (int line = 0; line <= CARET_HALF_WIDTH; line++) {
                 int half = CARET_HALF_WIDTH - line;
                 int y = upperY + 2 + line;
@@ -412,7 +583,7 @@ public final class TradingScreen extends Screen {
 
     /** 涨跌色切换按钮：涨色块、跌色块和当前方案名；点一下换成另一种方案，立即生效并写回客户端配置。 */
     private void extractSchemeToggle(GuiGraphicsExtractor graphics, int left, int top, int toggleWidth, int mouseX, int mouseY) {
-        Hit hit = new Hit(left, top, left + toggleWidth, top + TOGGLE_HEIGHT,
+        Hit hit = new Hit(left, top, left + toggleWidth, top + TOGGLE_HEIGHT, Cue.BUTTON_CLICK,
                 () -> ClientConfig.setColorScheme(ClientConfig.colorScheme().toggled()));
         graphics.fill(hit.left(), hit.top(), hit.right(), hit.bottom(),
                 hit.contains(mouseX, mouseY) ? TradingPalette.BUTTON_HOVER : TradingPalette.BUTTON);
@@ -460,7 +631,7 @@ public final class TradingScreen extends Screen {
      * 图表卡片：顶部页签行（K 线周期；盘口栏并进来时前面还有 K 线 / 盘口 / 最新成交三页，一行放不下就把周期挪到第二行），
      * 下面是 K 线图或盘口栏的当前页。
      */
-    private void extractChartCard(GuiGraphicsExtractor graphics, MarketSnapshot snapshot, int mouseX, int mouseY) {
+    private void extractChartCard(GuiGraphicsExtractor graphics, MarketSnapshot snapshot, int mouseX, int mouseY, float partialTick) {
         TradingLayout.Rect card = layout.chart();
         graphics.fill(card.left(), card.top(), card.right(), card.bottom(), TradingPalette.PANEL);
         graphics.enableScissor(card.left(), card.top(), card.right(), card.bottom());
@@ -507,6 +678,7 @@ public final class TradingScreen extends Screen {
                 CandlePeriod period = periods[i];
                 register(boxes[i], () -> ClientKlines.select(period));
             }
+            extractChartTypeToggle(graphics, card, boxes[periods.length - 1][2], rowTop, mouseX, mouseY);
         }
         graphics.horizontalLine(card.left(), card.right() - 1, contentTop, TradingPalette.DIVIDER);
         contentTop += 1;
@@ -517,16 +689,51 @@ public final class TradingScreen extends Screen {
             }
             List<Candle> candles = ClientKlines.candles();
             if (candles == null || candles.isEmpty()) {
+                chart.forget();
                 graphics.centeredText(font, Component.translatable("screen.creepercapital.trading.kline.loading"),
                         (card.left() + card.right()) / 2, GuiText.centeredY(font, contentTop, card.bottom()), TradingPalette.TEXT_SECONDARY);
             } else {
                 chart.extract(graphics, card.left() + 6, contentTop + 3, card.right() - 4, card.bottom() - 2, ClientKlines.selected(),
-                        candles, mouseX, mouseY);
+                        candles, mouseX, mouseY, partialTick);
             }
         } else {
+            chart.forget();
             marketColumn.extractPage(graphics, card.left(), contentTop, card.right(), card.bottom(), snapshot.symbol(), snapshot);
         }
         graphics.disableScissor();
+    }
+
+    /**
+     * 周期页签右侧、卡片右端的图表类型切换（K 线 / 线形）：先试正常间距，再试收紧间距，
+     * 都放不下就退成一个显示当前类型、点一下切到另一种的按钮；连这个也放不下就不画。
+     */
+    private void extractChartTypeToggle(GuiGraphicsExtractor graphics, TradingLayout.Rect card, int periodsEnd, int rowTop,
+            int mouseX, int mouseY) {
+        ChartType current = ClientConfig.chartType();
+        ChartType[] types = ChartType.values();
+        Component[] labels = {types[0].label(), types[1].label()};
+        int limit = periodsEnd + 8;
+        int right = card.right() - 4;
+        for (int padding : new int[] {6, 4, 2}) {
+            int total = TabStrip.width(font, labels, padding);
+            if (right - total >= limit) {
+                int left = right - total;
+                graphics.verticalLine(left - 3, rowTop + 3, rowTop + TAB_HEIGHT - 4, TradingPalette.DIVIDER);
+                int[][] boxes = TabStrip.extract(graphics, font, left, rowTop, TAB_HEIGHT, labels, current.ordinal(), padding,
+                        mouseX, mouseY);
+                for (int i = 0; i < types.length; i++) {
+                    ChartType type = types[i];
+                    register(boxes[i], () -> ClientConfig.setChartType(type));
+                }
+                return;
+            }
+        }
+        Component[] single = {current.label()};
+        int total = TabStrip.width(font, single, 3);
+        if (right - total >= limit) {
+            int[][] boxes = TabStrip.extract(graphics, font, right - total, rowTop, TAB_HEIGHT, single, 0, 3, mouseX, mouseY);
+            register(boxes[0], () -> ClientConfig.setChartType(current.next()));
+        }
     }
 
     private void showColumnPage(MarketColumn.Page page) {
@@ -535,7 +742,7 @@ public final class TradingScreen extends Screen {
     }
 
     private void register(int[] box, Runnable action) {
-        hits.add(new Hit(box[0], box[1], box[2], box[3], action));
+        hits.add(new Hit(box[0], box[1], box[2], box[3], Cue.TAB_SWITCH, action));
     }
 
     /** 底部表格区卡片：一排页签（放不下时收紧间距、换短名称）和当前页的数据。 */

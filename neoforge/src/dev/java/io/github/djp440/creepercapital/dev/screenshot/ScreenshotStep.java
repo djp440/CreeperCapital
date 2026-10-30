@@ -47,7 +47,25 @@ public record ScreenshotStep(String id, String title, String expected, View view
         /** 交易界面，盘口栏在「盘口」页（窄屏时图表卡片切到这一页）。 */
         ORDER_BOOK(minecraft -> TradingScreen.openWithOrderBook()),
         /** 交易界面，表格区切到资金费记录页。 */
-        FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", ""));
+        FUNDING(minecraft -> TradingScreen.openForTrading("FUNDING", "")),
+        /** 交易界面，图表放大到每根 K 线 14 像素，并往回看 120 根。 */
+        CHART_ZOOMED_IN(minecraft -> TradingScreen.openWithChartView(14, 120, 0)),
+        /** 交易界面，图表缩小到每根 K 线 2 像素（最新一根贴右）。 */
+        CHART_ZOOMED_OUT(minecraft -> TradingScreen.openWithChartView(2, 0, 0)),
+        /** 交易界面，图表缺省缩放、往回看 150 根。 */
+        CHART_PANNED(minecraft -> TradingScreen.openWithChartView(7, 150, 0)),
+        /** 交易界面，图表拖到缓存里最旧一根（往回看一个很大的数，被夹到边界），显示到头反馈。 */
+        CHART_AT_OLDEST(minecraft -> TradingScreen.openWithChartView(7, 1_000_000, 1)),
+        /** 交易界面，图表的指标设置浮层展开，第 2 行（MA 25）的色盘展开。 */
+        INDICATOR_SETTINGS(minecraft -> TradingScreen.openWithIndicatorSettings(1, -1, null)),
+        /** 交易界面，图表的指标设置浮层展开，第 1 行周期输入框里是不合法的 0（显示错误提示）。 */
+        INDICATOR_SETTINGS_INVALID(minecraft -> TradingScreen.openWithIndicatorSettings(-1, 0, "0")),
+        /** 交易界面，图表上正从持仓线往上拖出止盈线（触发价 = 最新价 × 1.008，还按着鼠标）。 */
+        CHART_EDIT_DRAGGING(minecraft -> TradingScreen.openWithChartEdit(1.008, true)),
+        /** 交易界面，图表上从持仓线往下拖出的止损线已松开（触发价 = 最新价 × 0.994），tag 上出现 ✓ / ✕。 */
+        CHART_EDIT_CONFIRM(minecraft -> TradingScreen.openWithChartEdit(0.994, false)),
+        /** 交易界面，当前合约最早挂出的那张当前委托处于「撤销中」（只是客户端状态，不发撤单）。 */
+        CHART_CANCELLING(minecraft -> TradingScreen.openWithChartCancelling());
 
         private final Consumer<Minecraft> opener;
 

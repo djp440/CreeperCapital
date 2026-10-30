@@ -7,7 +7,10 @@ import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Money;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.MarketTime;
 import io.github.djp440.creepercapital.core.trading.AdlRanking;
@@ -140,7 +143,7 @@ final class TradeTables {
             int ratioColor = ratio >= 0.8 ? TradingPalette.down() : ratio >= 0.5 ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_PRIMARY;
             String liquidation = risk == null || risk.liquidationPrice().isEmpty() ? "--"
                     : MarketFormat.price(risk.liquidationPrice().getAsDouble());
-            String symbol = position.symbol();
+            String symbol = ContractSpec.displaySymbol(position.symbol());
             columns.add(
                     Cell.text(symbol, sideColor),
                     Cell.text(mode + " " + position.leverage() + "x", TradingPalette.TEXT_SECONDARY),
@@ -172,7 +175,7 @@ final class TradeTables {
                     : TradingPalette.side(opensLong);
             columns.add(
                     Cell.text(MarketFormat.marketTime(new MarketTime(trade.marketSeconds())), TradingPalette.TEXT_SECONDARY),
-                    Cell.text(trade.symbol(), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(ContractSpec.displaySymbol(trade.symbol()), TradingPalette.TEXT_PRIMARY),
                     Cell.text(Component.translatable("screen.creepercapital.trading.trade_side."
                             + trade.kind().name().toLowerCase(Locale.ROOT) + "_" + trade.side().name().toLowerCase(Locale.ROOT))
                             .getString(), sideColor),
@@ -195,7 +198,7 @@ final class TradeTables {
             boolean shortfall = record.shortfall().isPositive();
             columns.add(
                     Cell.text(MarketFormat.marketTime(new MarketTime(record.marketSeconds())), TradingPalette.TEXT_SECONDARY),
-                    Cell.text(record.symbol(), TradingPalette.TEXT_PRIMARY),
+                    Cell.text(ContractSpec.displaySymbol(record.symbol()), TradingPalette.TEXT_PRIMARY),
                     Cell.text(Component.translatable("screen.creepercapital.trading.side."
                             + record.side().name().toLowerCase(Locale.ROOT)).getString(), TradingPalette.side(record.side() == Side.LONG)),
                     Cell.text(MarketFormat.fundingRate(record.rate()), TradingPalette.TEXT_PRIMARY),
@@ -258,7 +261,7 @@ final class TradeTables {
         String kind = order.reduceOnly() ? "close_" : "open_";
         return new Cell[] {
                 Cell.text(MarketFormat.marketTime(new MarketTime(marketSeconds)), TradingPalette.TEXT_SECONDARY),
-                Cell.text(order.symbol(), TradingPalette.TEXT_PRIMARY),
+                Cell.text(ContractSpec.displaySymbol(order.symbol()), TradingPalette.TEXT_PRIMARY),
                 Cell.text(Component.translatable("screen.creepercapital.trading.trade_side." + kind
                         + order.side().name().toLowerCase(Locale.ROOT)).getString(), TradingPalette.side(order.side() == Side.LONG)),
                 Cell.text(typeLabel(order), TradingPalette.TEXT_PRIMARY)};
@@ -281,6 +284,7 @@ final class TradeTables {
     boolean mouseClicked(double x, double y) {
         for (Button button : buttons) {
             if (button.contains(x, y)) {
+                CuePlayer.play(Cue.BUTTON_CLICK);
                 button.action().run();
                 return true;
             }

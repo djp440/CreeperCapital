@@ -118,7 +118,9 @@ class LangFilesTest {
      */
     private static final Set<String> NEUTRAL_IN_ZH = Set.of(
             TRADING + "order.holding_short", // 仅 “方向 合约 · 杠杆” 三个参数
-            TRADING + "column.adl");         // 列名缩写，直接写 ADL
+            TRADING + "column.adl",          // 列名缩写，直接写 ADL
+            TRADING + "chart.order",         // 图表委托 tag：仅 “类型 数量 @ 价格” 三个参数
+            TRADING + "chart.marker_count"); // 图表买卖点：仅 “买 / 卖 × 笔数” 两个参数
 
     @Test
     void placeholdersAreConsistentBetweenLanguages() {
@@ -277,6 +279,11 @@ class LangFilesTest {
         // 模组配置界面（NeoForge ConfigurationScreen）按 <模组 id>.configuration.<配置项> 找标题与说明，按配置文件名找分区标题
         for (String key : List.of("creepercapital.configuration.title", "creepercapital.configuration.colorScheme",
                 "creepercapital.configuration.colorScheme.tooltip",
+                "creepercapital.configuration.soundEnabled", "creepercapital.configuration.soundEnabled.tooltip",
+                "creepercapital.configuration.soundVolume", "creepercapital.configuration.soundVolume.tooltip",
+                "creepercapital.configuration.layoutOrderPanelRatio", "creepercapital.configuration.layoutOrderPanelRatio.tooltip",
+                "creepercapital.configuration.layoutMarketColumnRatio", "creepercapital.configuration.layoutMarketColumnRatio.tooltip",
+                "creepercapital.configuration.layoutTableRatio", "creepercapital.configuration.layoutTableRatio.tooltip",
                 "creepercapital.configuration.section.creepercapital.client.toml",
                 "creepercapital.configuration.section.creepercapital.client.toml.title")) {
             problems.addAll(checkKey(key, "ClientConfig（模组配置界面）"));

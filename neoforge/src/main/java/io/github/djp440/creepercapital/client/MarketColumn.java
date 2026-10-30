@@ -1,5 +1,7 @@
 package io.github.djp440.creepercapital.client;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -106,6 +108,7 @@ final class MarketColumn {
         if (index < 0) {
             return false;
         }
+        CuePlayer.play(Cue.TAB_SWITCH);
         page = Page.values()[index];
         return true;
     }

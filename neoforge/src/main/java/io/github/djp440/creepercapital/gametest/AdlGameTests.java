@@ -267,7 +267,7 @@ final class AdlGameTests {
             OrderResultPayload notice = TradingGameTests.last(MockClient.received(player, OrderResultPayload.class));
             helper.assertValueEqual(notice.code(), "auto_deleveraged", "玩家收到自动减仓通知");
             helper.assertFalse(notice.success(), "自动减仓通知不是成功提示");
-            helper.assertValueEqual(notice.args().get(0), DIAMOND, "通知里带着合约");
+            helper.assertValueEqual(notice.args().get(0), ContractSpec.displaySymbol(DIAMOND), "通知里带着合约（显示用的交易代码）");
             helper.assertFalse(ServerOfflineSummary.summaries().hasPending(id), "在线时的自动减仓不进离线汇总");
         } finally {
             TradingGameTests.finish(player);

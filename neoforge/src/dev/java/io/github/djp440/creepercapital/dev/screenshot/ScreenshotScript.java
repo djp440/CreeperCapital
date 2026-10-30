@@ -3,6 +3,7 @@ package io.github.djp440.creepercapital.dev.screenshot;
 import java.util.List;
 import java.util.function.Consumer;
 
+import io.github.djp440.creepercapital.client.ChartType;
 import io.github.djp440.creepercapital.client.ClientConfig;
 import io.github.djp440.creepercapital.client.ClientKlines;
 import io.github.djp440.creepercapital.client.ClientMarket;
@@ -20,7 +21,8 @@ import net.neoforged.neoforge.common.NeoForge;
 
 /**
  * 自动截图验收脚本：每张界面类的单，往 {@link #STEPS} 里追加步骤（编号、说明、视图）即可。
- * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌。
+ * 01~27 用缺省的绿涨红跌；28~40 切到红涨绿跌把各面板再截一遍（含全仓 / 杠杆与 ADL 灯、多头强平记录、钻石盘口），41 切回绿涨红跌；
+ * 42~44 是可拖拽布局（#31）：缺省布局、拖拽后的布局、恢复默认布局；45~48 是图表缩放 / 平移 / 到头反馈（#33）；49~51 是线形图（#32）；52~57 是指标隐藏 / 自定义 / 设置浮层（#34、#38）；58~62 是图上的持仓线、强平价、当前委托与买卖点（#35）；63~64 是拖拽持仓线 tag 设止盈止损的拖动中与 ✓ / ✕ 确认态（#36）；65 是当前委托 tag 上的「×」与撤销中置灰（#37）。
  */
 final class ScreenshotScript {
     static final List<ScreenshotStep> STEPS = List.of(
@@ -312,7 +314,138 @@ final class ScreenshotScript {
                             + "K 线阳线绿、阴线红，盘口卖盘红、买盘绿，下单面板「开多」绿、「开空」红，与 01~27 的配色一致；"
                             + "切换立即生效，不需要重开界面；无重叠、截断和乱码。",
                     View.TRADING,
-                    scheme(ColorScheme.GREEN_UP)));
+                    scheme(ColorScheme.GREEN_UP)),
+            new ScreenshotStep("42", "默认布局（#31，3 级验收）",
+                    "区域比例为缺省（客户端配置里三项比例都是 0）的标准布局，作为拖拽前的对照：标题栏、两行行情栏，下面左侧 K 线图卡片、图表右侧窄一点的盘口栏、底部表格区，"
+                            + "最右侧是从行情栏下一直通到底部的下单面板；卡片之间是同样宽的缝；标题栏右端是灰掉的「恢复默认布局」按钮（布局还是缺省，点不动）；"
+                            + "截图时鼠标停在窗口正中，正好悬停在 K 线图与盘口栏之间的缝上，所以这条缝高亮成灰色（悬停提示；真机上光标同时变成左右调整形）；"
+                            + "表格区回到资产页，无重叠、截断和乱码。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), layout(0, 0, 0))),
+            new ScreenshotStep("43", "拖拽边框后的布局（#31，3 级验收）",
+                    "等同于玩家把三条边框都拖过后的布局（下单面板宽度比例 0.34、盘口栏 0.26、表格区高度比例 0.50）：下单面板和盘口栏都比 42 更宽，"
+                            + "K 线图相应变窄，底部表格区明显变高、图表变矮，但图表仍不小于最小尺寸；卡片之间的缝仍然等宽，没有重叠、不越出窗口；"
+                            + "标题栏右端的「恢复默认布局」按钮亮起（白字，可点）；下单面板、盘口、表格内容跟着新尺寸重排，无截断和乱码。",
+                    View.TRADING,
+                    layout(0.34, 0.26, 0.5)),
+            new ScreenshotStep("44", "恢复默认布局（#31，3 级验收）",
+                    "相当于点了「恢复默认布局」：布局与 42 完全一致，「恢复默认布局」按钮重新灰掉；客户端配置里的三项比例回到 0（下一次启动不受截图影响）。",
+                    View.TRADING,
+                    layout(0, 0, 0)),
+            new ScreenshotStep("45", "图表放大后（#33，3 级验收）",
+                    "1m 周期，绿涨红跌；每根蜡烛约 14 像素宽（比 03 明显更粗更疏），只能看到二十来根，图表停在往回看 120 根处（最新价格虚线不在画面最右，"
+                            + "但价格轴右侧的最新价格标签始终在）；价格轴范围只贴着这二十来根（刻度间距与 03 不同）；"
+                            + "均线、成交量柱与蜡烛一一对应，最左 / 最右一根若只露出一部分，被裁在绘图区内，不压到图例或价格轴；时间轴标注间隔随蜡烛变粗而变密；无重叠和乱码。",
+                    View.CHART_ZOOMED_IN,
+                    both(scheme(ColorScheme.GREEN_UP), select(CandlePeriod.M1))),
+            new ScreenshotStep("46", "图表缩小后（#33，3 级验收）",
+                    "每根蜡烛 2 像素（实体 1 像素宽，比 03 细密得多），同一块图表里能看到约 200 根；价格轴范围随之放大到覆盖这些根；"
+                            + "时间轴标注的间隔成倍加大，相邻标注不挤在一起；最新一根贴右，均线与成交量柱仍清晰连续。",
+                    View.CHART_ZOOMED_OUT),
+            new ScreenshotStep("47", "图表平移后（#33，3 级验收）",
+                    "缺省缩放（7 像素）、往回看 150 根：画面里是更早的行情，最右一根不是最新一根；图例默认显示最右可见那一根的开高低收；"
+                            + "价格轴随这段可见区间重新缩放（与 03 的价位范围不同）；时间轴上的标注是更早的时间；右侧最新价格标签与虚线按当前最新价格画（虚线若超出价格轴范围会落在图外，不画出界）。",
+                    View.CHART_PANNED),
+            new ScreenshotStep("48", "图表拖到缓存最旧一根（#33，3 级验收）",
+                    "往回看到缓存里最早的一根：它贴着绘图区左边缘；左边缘泛一层向右渐隐的黄光，其右侧有黄字提示框「已到最早的缓存 K 线」；"
+                            + "提示框在主图区内、不盖住图例，也不越出图表。",
+                    View.CHART_AT_OLDEST),
+            new ScreenshotStep("49", "线形图：绿涨红跌（#32，3 级验收）",
+                    "1h 周期、绿涨红跌；图表工具区（周期页签右侧、卡片右端）有「K线 | 线形」两个页签，「线形」为黄字加下划线；"
+                            + "图表区是一条 2 像素粗的收盘价折线，没有蜡烛，线下是自上而下渐隐的同色面积填充（靠近线最浓，到成交量副图上方消失）；"
+                            + "线色规则：可见区间最后一根收盘价不低于第一根开盘价为涨色，否则为跌色——这一段 1h 行情是从约 1,2xx 跌到 1,0xx（最后收盘低于第一根开盘），所以线与面积是跌色（红）；"
+                            + "均线、成交量柱（仍按每根涨跌着色）、右侧价格轴、最新价格虚线与标签、时间轴、图例都照常；价格轴范围只贴着收盘价的区间；无重叠和乱码。",
+                    View.TRADING,
+                    both(both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.LINE)), select(CandlePeriod.H1))),
+            new ScreenshotStep("50", "线形图：红涨绿跌（#32，3 级验收）",
+                    "与 49 同一份数据、同一个视口，只是涨跌色换成红涨绿跌：这段行情是跌，所以线与面积填充变为跌色（绿）；"
+                            + "价格轴最新价格标签、成交量柱、行情栏涨跌色、盘口颜色随之变化；图表工具区「线形」仍是选中状态。",
+                    View.TRADING,
+                    scheme(ColorScheme.RED_UP)),
+            new ScreenshotStep("51", "切回 K 线图（#32，3 级验收）",
+                    "涨跌色回到绿涨红跌、图表类型切回 K 线：图表工具区「K线」为黄字加下划线，图表区重新是蜡烛图；"
+                            + "周期仍是 1h，图表立即显示（没有「加载中」闪现——切换类型复用已缓存的 K 线，不重新请求历史）。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), chartType(ChartType.CANDLES))),
+            new ScreenshotStep("52", "指标全部隐藏（#34，3 级验收）",
+                    "1h 周期；图例第二行里齿轮之后的 MA(7) / MA(25) / MA(99) 与「成交量」四项都变灰（只剩名称，没有数值）；"
+                            + "图表上没有任何均线，成交量副图消失，主图向下延伸占满原来成交量的位置；价格轴范围只贴着蜡烛本身（不再被均线拉大）；"
+                            + "第一行 O/H/L/C 照常；时间轴、最新价格标签正常。",
+                    View.TRADING,
+                    both(both(select(CandlePeriod.H1), indicators("ma=7:0:0,25:1:0,99:2:0;volume=0")), scheme(ColorScheme.GREEN_UP))),
+            new ScreenshotStep("53", "指标部分隐藏（#34，3 级验收）",
+                    "只隐藏 MA(25)：图例里 MA(25) 变灰（无数值）、MA(7) 黄、MA(99) 蓝仍带数值，成交量项正常（带数值）；"
+                            + "图上只有黄、蓝两条均线，粉色那条没有；成交量柱仍在；价格轴范围只受显示着的均线影响。",
+                    View.TRADING,
+                    indicators("ma=7:0:1,25:1:0,99:2:1;volume=1")),
+            new ScreenshotStep("54", "自定义指标参数后的图表（#38，3 级验收）",
+                    "五条自定义均线：MA(5) 青、MA(20) 橙、MA(60) 紫、MA(120) 白、MA(200) 粉；图例第二行齿轮之后依次排这五项和「成交量」，"
+                            + "放不下的项整项省掉、不越出图表（默认窗口宽度下只排得下前三项，被省掉的项仍可在设置浮层里切换，见 55）；"
+                            + "图上五条均线按各自周期重新计算，周期越长越平缓、越滞后；周期大于已有 K 线根数的均线没有值；颜色与图例一致；价格轴范围受这些显示着的均线影响。",
+                    View.TRADING,
+                    indicators("ma=5:3:1,20:4:1,60:5:1,120:6:1,200:7:1;volume=1")),
+            new ScreenshotStep("55", "指标设置浮层，色盘展开（#38，3 级验收）",
+                    "点齿轮后在图表左上角弹出的浮层（盖在图例与主图左上方，不是另开界面）：标题行是黄色齿轮 + 「指标设置」，右端是灰按钮「恢复默认」和 ×；"
+                            + "其下五行，每行从左到右是黄色复选框（已选中）、颜色块、「MA」、周期输入框（显示 5 / 20 / 60 / 120 / 200）、「根 K 线」和红色 ×（删除）；"
+                            + "第 2 行（MA 20）的颜色块带白框、下方展开一排八色色盘，当前色（橙）带白框；再下面一行是成交量的复选框 + 「成交量」；底部是灰按钮「最多 5 条」（已满，灰字）；"
+                            + "浮层整体不越出图表卡片，文字清晰；浮层后面的图例被盖住、均线仍在。",
+                    View.INDICATOR_SETTINGS),
+            new ScreenshotStep("56", "指标设置：周期输入不合法的提示（#38，3 级验收）",
+                    "浮层展开，第一行周期输入框带红色边框、里面是 0 和光标，成交量行下方有红字提示「周期需为 1~500 的整数」；"
+                            + "均线周期保持原值（图例里仍是 MA(5)），底部按钮在提示下面，整体不越出图表。",
+                    View.INDICATOR_SETTINGS_INVALID),
+            new ScreenshotStep("57", "恢复默认指标（#34 / #38，3 级验收）",
+                    "相当于点了「恢复默认」：回到 MA(7) 黄 / MA(25) 粉 / MA(99) 蓝三条均线与成交量全部显示，浮层已收起；"
+                            + "客户端配置里的 indicators 回到缺省（下一次启动不受截图影响）。",
+                    View.TRADING,
+                    indicators("ma=7:0:1,25:1:1,99:2:1;volume=1")),
+            new ScreenshotStep("58", "图上的持仓线 / 强平价 / 当前委托 / 买卖点：DIAMONDCRP 多仓，绿涨红跌（#35，3 级验收）",
+                    "1m 周期、DIAMONDCRP；先清掉前面步骤留下的仓位与委托，再逐仓 20x 开多 1.500、加多 0.500、平掉 0.500（仓位 1.500），"
+                            + "设止盈（最新价 +1.5%）、止损（−1.2%），再挂一张低于市价 0.8% 的限价开多 0.500。图上（只看 DIAMONDCRP）："
+                            + "开仓均价处一条绿色实线，左侧 tag「多 1.500  盈亏 ±x.xx」（盈亏按标记价格，盈绿亏红的数值在 tag 里同为线色）；"
+                            + "强平价一条品牌黄虚线，tag「强平价 x,xxx.xx」，约在开仓价下方 4~5%，多半超出可见区间，此时 tag 钳在主图下沿、带朝下的箭头、不画线；"
+                            + "止盈绿虚线 tag「止盈·最新价 1.500 @ …」、止损红虚线 tag「止损·最新价 1.500 @ …」、限价绿虚线 tag「开多 限价 0.500 @ …」；"
+                            + "价格超出可见区间的 tag 钳在上沿 / 下沿并带方向箭头；tag 挤在一起时上下错开、互不重叠、不越出主图区；"
+                            + "价格轴右侧同步有这些价格的彩色标签（强平价黄底黑字），与最新价格标签一起按价格顺序错开、互不遮挡；"
+                            + "最新几根 K 线上有买卖点：最低价下方绿色「买」（同一根两笔时为「买×2」）、最高价上方红色「卖」；更早步骤在 DIAMONDCRP 上的成交若还在缓存 K 线里也标出；"
+                            + "GUNPOWDERCRP 的仓位与委托不出现在这张图上；无重叠、截断和乱码。",
+                    View.TRADING,
+                    both(both(scheme(ColorScheme.GREEN_UP), select(CandlePeriod.M1)), setupOverlayPositions())),
+            new ScreenshotStep("59", "图上的持仓线 / 强平价 / 当前委托：GUNPOWDERCRP 空仓，绿涨红跌（#35，3 级验收）",
+                    "切到 GUNPOWDERCRP（逐仓 10x 空 50 个，止盈 −1.5%、止损 +1.5%，限价开空 10 个 @ +1%，限价平空 10 个 @ −1%）："
+                            + "开仓均价处红色实线，tag「空 50  盈亏 ±x.xx」；强平价黄虚线约在开仓价上方 9%（多半钳在上沿、带朝上的箭头）；"
+                            + "止盈 tag 绿、止损 tag 红；「开空 限价」红（卖）、「平空 限价只减仓」绿（买）；最新 K 线上方有红色「卖」（开空）；"
+                            + "DIAMONDCRP 的线一条都不出现；tag、价格轴标签错开不重叠。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")),
+            new ScreenshotStep("60", "图上的持仓线 / 强平价 / 当前委托 / 买卖点：DIAMONDCRP 多仓，红涨绿跌（#35，3 级验收）",
+                    "与 58 同一份仓位与委托，只是涨跌色换成红涨绿跌：多仓实线与 tag 变红，止盈（盈利色）红、止损（亏损色）绿，限价开多（买）红，"
+                            + "买卖点「买」红、「卖」绿，强平价仍是品牌黄（不随涨跌色变）；价格轴标签的底色同步变化。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.RED_UP), selectContract("DIAMONDCRP"))),
+            new ScreenshotStep("61", "图上的持仓线 / 强平价 / 当前委托：GUNPOWDERCRP 空仓，红涨绿跌（#35，3 级验收）",
+                    "与 59 同一份仓位与委托，红涨绿跌：空仓实线与 tag 变绿，止盈红、止损绿，「开空 限价」绿、「平空 限价只减仓」红，「卖」绿；强平价仍是品牌黄。",
+                    View.TRADING,
+                    selectContract("GUNPOWDERCRP")),
+            new ScreenshotStep("62", "切回绿涨红跌（#35）",
+                    "涨跌色回到绿涨红跌，合约回到 DIAMONDCRP；图上的线与 tag 与 58 一致（价格随行情略有变化）。",
+                    View.TRADING,
+                    both(scheme(ColorScheme.GREEN_UP), selectContract("DIAMONDCRP"))),
+            new ScreenshotStep("63", "拖拽持仓线 tag 设止盈：拖动中（#36，3 级验收）",
+                    "DIAMONDCRP 多仓（58 的场景）；等同于玩家按住持仓线 tag 往上拖到最新价 +0.8% 还没松手：那里多出一条绿色虚线（止盈色），"
+                            + "其 tag 显示「止盈 x,xxx.xx  预计盈亏 +x.xx」（预计盈亏 = 整个仓位 1.500 按这个触发价算的盈亏，为正），tag 上还没有 ✓ / ✕；"
+                            + "价格轴上同步有这个价格的绿色标签；它和其它 tag 一起错开、不重叠；图上的十字线因为在拖动而隐藏。",
+                    View.CHART_EDIT_DRAGGING),
+            new ScreenshotStep("64", "拖拽持仓线 tag 设止损：松开后的 ✓ / ✕ 确认态（#36，3 级验收）",
+                    "等同于往下拖到最新价 −0.6% 后松手：一条红色虚线（止损色）停在那里，tag「止损 x,xxx.xx  预计盈亏 −x.xx」（预计盈亏为负），"
+                            + "tag 右端隔一道竖线是两个按钮：绿色对勾 ✓（提交）和白色叉 ✕（取消），两个按钮等宽、与文字区之间留着一小段缝；"
+                            + "还没有提交，所以「当前委托」里没有这张止损；tag 不越出图表、不与其它 tag 重叠。",
+                    View.CHART_EDIT_CONFIRM),
+            new ScreenshotStep("65", "当前委托 tag 上的「×」快捷撤销与撤销中状态（#37，3 级验收）",
+                    "DIAMONDCRP 多仓（58 的场景）：止盈、止损、限价开多三张当前委托的 tag 右端各有一个等宽的白色叉「×」，与文字之间隔一道竖线和一小段缝；"
+                            + "持仓线 tag 和强平价 tag 没有「×」；其中最早挂出的那张（止盈）处于「撤销中」：线和 tag 变灰，文字末尾是「撤销中…」，"
+                            + "它的「×」是灰色（点不动）；其它 tag 颜色不变；tag 不越出图表、不与其它 tag 重叠、文字不被「×」截断。",
+                    View.CHART_CANCELLING));
 
     private ScreenshotScript() {
     }
@@ -320,6 +453,21 @@ final class ScreenshotScript {
     /** 切换涨跌色方案（写进客户端配置，与交易界面上的切换按钮、模组配置界面改的是同一项）。 */
     private static Consumer<Minecraft> scheme(ColorScheme scheme) {
         return minecraft -> ClientConfig.setColorScheme(scheme);
+    }
+
+    /** 切换图表类型（写进客户端配置，与交易界面上的页签、模组配置界面改的是同一项）。 */
+    private static Consumer<Minecraft> chartType(ChartType type) {
+        return minecraft -> ClientConfig.setChartType(type);
+    }
+
+    /** 设置图表指标（配置字符串格式见 ClientConfig；与交易界面图例旁的齿轮浮层改的是同一项配置）。 */
+    private static Consumer<Minecraft> indicators(String encoded) {
+        return minecraft -> ClientConfig.setIndicatorsRaw(encoded);
+    }
+
+    /** 设置交易界面的区域比例（等同于玩家拖拽边框后松手，写进客户端配置）；全 0 即缺省布局。 */
+    private static Consumer<Minecraft> layout(double orderPanel, double column, double table) {
+        return minecraft -> ClientConfig.setLayoutRatios(orderPanel, column, table);
     }
 
     /** 下单面板回到市价、「预估」页（前面的步骤停在限价或止盈止损页）。 */
@@ -521,6 +669,48 @@ final class ScreenshotScript {
                 });
             }
         };
+    }
+
+    /**
+     * 图表叠加信息（#35）的场景：撤掉全部当前委托、平掉全部仓位，两个合约都切回逐仓，然后
+     * DIAMONDCRP 逐仓 20x 开多 1.500、加多 0.500、平 0.500（同一根 K 线上「买×2」和「卖」），设止盈 +1.5% / 止损 −1.2%，挂限价开多 0.500 @ −0.8%；
+     * GUNPOWDERCRP 逐仓 10x 开空 50，设止盈 −1.5% / 止损 +1.5%，挂限价开空 10 @ +1%、限价平空 10 @ −1%。
+     * 几个包按发送顺序在服务端处理；客户端此刻还看着旧仓位，所以杠杆直接写在包里。
+     */
+    private static Consumer<Minecraft> setupOverlayPositions() {
+        return minecraft -> {
+            ClientTrading.openOrdersNewestFirst().forEach(order -> ClientTrading.cancel(order.id()));
+            ClientTrading.positions().forEach(position -> ClientPacketDistributor.sendToServer(
+                    new OrderPayload(OrderPayload.Action.CLOSE, position.symbol(), position.lots(), 0)));
+            for (String symbol : List.of("DIAMONDCRP", "GUNPOWDERCRP")) {
+                ClientPacketDistributor.sendToServer(new OrderPayload(OrderPayload.Action.SET_ISOLATED, symbol, 0, 10));
+            }
+            ClientTrading.setTriggerSource(TriggerSource.LAST);
+            ClientMarket.snapshot("DIAMONDCRP").ifPresent(snapshot -> {
+                double last = snapshot.lastPrice();
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 1500, 20, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 500, 20, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.CLOSE, "DIAMONDCRP", 500, 0, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.PROTECT, "DIAMONDCRP", 1500, 0, OrderPayload.Execution.MARKET, 0, last * 1.015, last * 0.988);
+                send(OrderPayload.Action.OPEN_LONG, "DIAMONDCRP", 500, 20, OrderPayload.Execution.LIMIT, last * 0.992, 0, 0);
+            });
+            ClientMarket.snapshot("GUNPOWDERCRP").ifPresent(snapshot -> {
+                double last = snapshot.lastPrice();
+                send(OrderPayload.Action.OPEN_SHORT, "GUNPOWDERCRP", 50, 10, OrderPayload.Execution.MARKET, 0, 0, 0);
+                send(OrderPayload.Action.PROTECT, "GUNPOWDERCRP", 50, 0, OrderPayload.Execution.MARKET, 0, last * 0.985, last * 1.015);
+                send(OrderPayload.Action.OPEN_SHORT, "GUNPOWDERCRP", 10, 10, OrderPayload.Execution.LIMIT, last * 1.01, 0, 0);
+                send(OrderPayload.Action.CLOSE, "GUNPOWDERCRP", 10, 0, OrderPayload.Execution.LIMIT, last * 0.99, 0, 0);
+            });
+            ClientTrading.selectLeverage("DIAMONDCRP", 20);
+            ClientTrading.selectLeverage("GUNPOWDERCRP", 10);
+            ClientMarket.select("DIAMONDCRP");
+        };
+    }
+
+    private static void send(OrderPayload.Action action, String symbol, long lots, int leverage, OrderPayload.Execution execution,
+            double price, double takeProfit, double stopLoss) {
+        ClientPacketDistributor.sendToServer(new OrderPayload(action, symbol, lots, leverage, execution, price, takeProfit,
+                stopLoss, TriggerSource.LAST, false));
     }
 
     private static Consumer<Minecraft> selectContract(String symbol) {

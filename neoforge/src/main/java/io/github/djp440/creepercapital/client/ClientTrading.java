@@ -9,6 +9,9 @@ import java.util.Set;
 
 import org.jspecify.annotations.Nullable;
 
+import io.github.djp440.creepercapital.client.sound.Cue;
+import io.github.djp440.creepercapital.client.sound.CuePlayer;
+import io.github.djp440.creepercapital.client.sound.ResultCues;
 import io.github.djp440.creepercapital.core.market.MarginTiers;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import io.github.djp440.creepercapital.core.market.TradingParams;
@@ -70,6 +73,7 @@ public final class ClientTrading {
         crossSymbols = Set.copyOf(payload.crossSymbols());
         orders = List.copyOf(payload.orders());
         funding = List.copyOf(payload.funding());
+        ChartOrderActions.onState(orders);
     }
 
     static void accept(AdlLightsPayload payload) {
@@ -84,6 +88,9 @@ public final class ClientTrading {
     static void accept(OrderResultPayload payload) {
         lastResult = new Message(payload.success(),
                 Component.translatable("message.creepercapital.order." + payload.code(), payload.args().toArray()));
+        ChartOrderActions.onResult(payload.success(), payload.code(), lastResult.text());
+        // 服务端推送的结果（成交、触发、强平、拒单……）在交易界面关闭时也要响
+        ResultCues.forResult(payload.success(), payload.code()).ifPresent(CuePlayer::play);
     }
 
     static void clear() {
@@ -100,6 +107,7 @@ public final class ClientTrading {
         triggerSource = TriggerSource.LAST;
         reduceOnly = false;
         lastResult = null;
+        ChartOrderActions.clear();
     }
 
     public static Optional<TradingParams> params(String symbol) {
@@ -120,6 +128,11 @@ public final class ClientTrading {
         List<PlayerTrade> newestFirst = new ArrayList<>(trades);
         java.util.Collections.reverse(newestFirst);
         return newestFirst;
+    }
+
+    /** 最近的成交，最旧的在前（图表买卖点用）。 */
+    static List<PlayerTrade> trades() {
+        return trades;
     }
 
     /** 资金费记录，最新的在前。 */
@@ -194,6 +207,7 @@ public final class ClientTrading {
     /** 面板自己发现的错误（例如数量格式不对），不用发给服务端。 */
     static void showLocalError(Component text) {
         lastResult = new Message(false, text);
+        CuePlayer.play(Cue.REJECTED);
     }
 
     /** 开发用（自动截图）：清掉面板上的下单结果。 */
@@ -306,7 +320,7 @@ public final class ClientTrading {
                 takeProfit, stopLoss, triggerSource, reduceOnly));
     }
 
-    /** 撤销一张挂单；结果由服务端回报。 */
+    /** 撤销一张当前委托（挂单或止盈止损）；结果由服务端回报。 */
     public static void cancel(long orderId) {
         ClientPacketDistributor.sendToServer(new CancelOrderPayload(orderId));
     }
