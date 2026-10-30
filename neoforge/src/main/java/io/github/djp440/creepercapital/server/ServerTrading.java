@@ -380,7 +380,7 @@ public final class ServerTrading {
                 continue;
             }
             int decimals = ServerMarket.spec(event.symbol()).quantityDecimals();
-            ModPayloads.sendTo(owner, new OrderResultPayload(false, "auto_deleveraged", List.of(event.symbol(),
+            ModPayloads.sendTo(owner, new OrderResultPayload(false, "auto_deleveraged", List.of(ContractSpec.displaySymbol(event.symbol()),
                     formatQuantity(event.lots(), decimals), formatPrice(event.price()), event.lostProfit().toDisplayString())));
         }
         if (!events.isEmpty()) {

@@ -12,6 +12,7 @@ import io.github.djp440.creepercapital.client.sound.CuePlayer;
 import io.github.djp440.creepercapital.core.account.Assets;
 import io.github.djp440.creepercapital.core.kline.Candle;
 import io.github.djp440.creepercapital.core.kline.CandlePeriod;
+import io.github.djp440.creepercapital.core.market.ContractSpec;
 import io.github.djp440.creepercapital.core.market.MarketSnapshot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -380,7 +381,7 @@ public final class TradingScreen extends Screen {
     private int menuWidth(List<String> symbols) {
         int widest = 0;
         for (String symbol : symbols) {
-            widest = Math.max(widest, font.width(symbol));
+            widest = Math.max(widest, font.width(ContractSpec.displaySymbol(symbol)));
         }
         return widest + MENU_PADDING * 2;
     }
@@ -476,7 +477,7 @@ public final class TradingScreen extends Screen {
             String symbol = symbols.get(i);
             int color = symbol.equals(current) ? TradingPalette.BRAND_YELLOW
                     : i == hovered ? TradingPalette.TEXT_PRIMARY : TradingPalette.TEXT_SECONDARY;
-            graphics.text(font, symbol, left + MENU_PADDING, GuiText.centeredY(font, rowTop, rowTop + MENU_ROW_HEIGHT), color, false);
+            graphics.text(font, ContractSpec.displaySymbol(symbol), left + MENU_PADDING, GuiText.centeredY(font, rowTop, rowTop + MENU_ROW_HEIGHT), color, false);
         }
     }
 
@@ -513,7 +514,7 @@ public final class TradingScreen extends Screen {
     /** 行情栏各项的排版：交易代码块之后依次排，放不下折行，超过行数上限时丢掉优先级低的项。 */
     private TickerPlan planTicker(MarketSnapshot snapshot) {
         List<Stat> stats = stats(snapshot);
-        int symbolWidth = Math.max(font.width(snapshot.symbol()) + caretSpace(),
+        int symbolWidth = Math.max(font.width(ContractSpec.displaySymbol(snapshot.symbol())) + caretSpace(),
                 font.width(Component.translatable("screen.creepercapital.trading.perpetual")));
         int toggleWidth = toggleWidth();
         int left = TradingLayout.GAP + PAD;
@@ -552,10 +553,10 @@ public final class TradingScreen extends Screen {
             graphics.fill(symbolButton.left(), symbolButton.top(), symbolButton.right(), symbolButton.bottom(), TradingPalette.HOVER);
         }
         int upperY = card.top() + upperOffset;
-        graphics.text(font, snapshot.symbol(), left, upperY, TradingPalette.TEXT_PRIMARY, false);
+        graphics.text(font, ContractSpec.displaySymbol(snapshot.symbol()), left, upperY, TradingPalette.TEXT_PRIMARY, false);
         if (switchable) {
             int caretColor = contractMenuOpen ? TradingPalette.BRAND_YELLOW : TradingPalette.TEXT_SECONDARY;
-            int caretCenter = left + font.width(snapshot.symbol()) + CARET_GAP + CARET_HALF_WIDTH;
+            int caretCenter = left + font.width(ContractSpec.displaySymbol(snapshot.symbol())) + CARET_GAP + CARET_HALF_WIDTH;
             for (int line = 0; line <= CARET_HALF_WIDTH; line++) {
                 int half = CARET_HALF_WIDTH - line;
                 int y = upperY + 2 + line;

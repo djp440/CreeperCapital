@@ -17,6 +17,15 @@ class ContractSpecTest {
     }
 
     @Test
+    @DisplayName("给玩家看的交易代码把标的和计价币分开：DIAMONDCRP → DIAMOND / CRP，不合格式的原样返回")
+    void displaySymbolSeparatesQuote() {
+        assertEquals("DIAMOND / CRP", ContractSpec.displaySymbol("DIAMONDCRP"));
+        assertEquals("GOLD_INGOT / CRP", ContractSpec.displaySymbol("GOLD_INGOTCRP"));
+        assertEquals("CRP", ContractSpec.displaySymbol("CRP"));
+        assertEquals("diamond", ContractSpec.displaySymbol("diamond"));
+    }
+
+    @Test
     @DisplayName("内置两个合约：DIAMONDCRP（钻石）与 GUNPOWDERCRP（火药），火药的波动率倾向比钻石猛得多")
     void defaultsAreDiamondAndGunpowder() {
         List<ContractSpec> defaults = ContractSpec.defaults();

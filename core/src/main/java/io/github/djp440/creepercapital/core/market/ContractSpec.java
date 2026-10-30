@@ -74,6 +74,11 @@ public record ContractSpec(String symbol, String underlying, double initialPrice
         IndexModel.Calibration.of(symbol, initialPrice, volatility);
     }
 
+    /** 给玩家看的交易代码：标的和计价币分开写，例如 DIAMONDCRP → {@code DIAMOND / CRP}；不是这个格式的原样返回。 */
+    public static String displaySymbol(String symbol) {
+        return SYMBOL_PATTERN.matcher(symbol).matches() ? symbol.substring(0, symbol.length() - 3) + " / CRP" : symbol;
+    }
+
     /** 持仓总量上限比例取默认的 50%。 */
     public ContractSpec(String symbol, String underlying, double initialPrice, double baseVolume,
             VolatilityProfile volatility, double spread, int maxLeverage, int quantityDecimals, double depthSlippage,
