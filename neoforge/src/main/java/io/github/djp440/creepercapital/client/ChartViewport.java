@@ -9,7 +9,8 @@ import io.github.djp440.creepercapital.core.kline.Candle;
  * 对象不可变，平移、缩放都返回新视口；K 线根数和绘图区宽度每次由调用方传入，所以 K 线追加、窗口改尺寸都不需要改视口。
  * <p>
  * 坐标约定：第 {@code i} 根 K 线占「序号区间」{@code [i, i + 1)}，序号可以是小数（表示一根 K 线内部的位置）。
- * 绘图区右缘对应序号 {@code count - offset}；{@code offset = 0} 即最新一根紧贴右缘。
+ * 绘图区右缘对应序号 {@code count - offset}；{@code offset = 0} 即最新一根紧贴右缘，负值表示最新一根右边留出空白
+ * （最多留到最新一根居中）。
  * 其它要在图上定位的东西（买卖点、持仓线、tag）都通过 {@link #project} 得到的 {@link Projection} 换算坐标。
  */
 record ChartViewport(double slotWidth, double offset) {
@@ -49,9 +50,14 @@ record ChartViewport(double slotWidth, double offset) {
         return Math.max(0, count - plotWidth / slotWidth);
     }
 
-    /** 把平移量夹回 {@code [0, maxOffset]}（K 线根数变少、窗口变宽后可能越界）。 */
+    /** 最多能往新的方向拖多远（负值）：最新一根的中心拖到绘图区正中为止；绘图区窄到放不下半屏时是 0。 */
+    double minOffset(double plotWidth) {
+        return Math.min(0, 0.5 - plotWidth / (2 * slotWidth));
+    }
+
+    /** 把平移量夹回 {@code [minOffset, maxOffset]}（K 线根数变少、窗口变宽后可能越界）。 */
     ChartViewport clamped(int count, double plotWidth) {
-        double limited = Math.max(0, Math.min(offset, maxOffset(count, plotWidth)));
+        double limited = Math.max(minOffset(plotWidth), Math.min(offset, maxOffset(count, plotWidth)));
         return limited == offset ? this : new ChartViewport(slotWidth, limited);
     }
 
@@ -62,7 +68,7 @@ record ChartViewport(double slotWidth, double offset) {
 
     /**
      * 拖 {@code dx} 像素时因为到头而没生效的部分（像素，符号同 {@code dx}）；完全生效返回 0。
-     * 正值：已经没有更早的 K 线了；负值：已经是最新一根了。
+     * 正值：已经没有更早的 K 线了；负值：最新一根已经拖到正中了。
      */
     double overscroll(double dx, int count, double plotWidth) {
         double applied = (panned(dx, count, plotWidth).offset - offset) * slotWidth;

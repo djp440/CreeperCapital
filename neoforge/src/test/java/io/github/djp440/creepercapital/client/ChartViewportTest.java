@@ -58,7 +58,7 @@ class ChartViewportTest {
     }
 
     @Test
-    @DisplayName("平移越界：最旧一根拖到左边缘为止，最新一根不能拖过右边缘；K 线全放得下时根本拖不动")
+    @DisplayName("平移越界：最旧一根拖到左边缘为止，最新一根拖到绘图区正中为止")
     void panningIsClampedAtBothEnds() {
         // 100 根、绘图区放 10 根：最多往回拖 90 根，此时第 0 根贴着左边缘
         ChartViewport oldest = ChartViewport.latest().panned(1_000_000, 100, 70);
@@ -66,10 +66,14 @@ class ChartViewportTest {
         assertEquals(0.0, oldest.project(0, 70, 100).leftIndex(), EPS);
         assertEquals(0, oldest.project(0, 70, 100).firstVisible());
 
-        assertEquals(0.0, ChartViewport.latest().panned(-50, 100, 70).offset(), EPS);
+        // 向左拖到头：最新一根（第 99 根）的中心落在绘图区正中
+        ChartViewport newest = ChartViewport.latest().panned(-1_000_000, 100, 70);
+        assertEquals(-4.5, newest.offset(), EPS);
+        assertEquals(35.0, newest.project(0, 70, 100).centerX(99), EPS);
 
-        // 只有 4 根，放得下：不能平移
+        // 只有 4 根，放得下：不能往回看，但仍能把最新一根拖到正中
         assertEquals(0.0, ChartViewport.latest().panned(30, 4, 70).offset(), EPS);
+        assertEquals(-4.5, ChartViewport.latest().panned(-1_000_000, 4, 70).offset(), EPS);
     }
 
     @Test
@@ -83,8 +87,9 @@ class ChartViewportTest {
         // 离最旧还差 7 像素（1 根），拖 20：生效 7，越界 13
         ChartViewport almost = new ChartViewport(7, 89);
         assertEquals(13.0, almost.overscroll(20, 100, 70), EPS);
-        // 在最新一根处向左拖是越界（负值）
-        assertEquals(-9.0, ChartViewport.latest().overscroll(-9, 100, 70), EPS);
+        // 最新一根贴右缘时向左拖还能拖到正中（4.5 根 = 31.5 像素），多出的部分是越界（负值）
+        assertEquals(0.0, ChartViewport.latest().overscroll(-9, 100, 70), EPS);
+        assertEquals(-8.5, ChartViewport.latest().overscroll(-40, 100, 70), EPS);
     }
 
     @Test

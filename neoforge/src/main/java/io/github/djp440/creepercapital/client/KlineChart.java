@@ -397,18 +397,23 @@ final class KlineChart {
             graphics.requestCursor(CursorTypes.RESIZE_EW);
         }
 
-        // 十字线先画，最新价格标签后画：两个价格标签重叠时，最新价格盖在上面
-        int hovered = isDragging() || panel.contains(mouseX, mouseY) ? -1 : view.candleAt(mouseX);
-        if (hovered >= 0 && mouseY >= mainTop && mouseY < volumeBottom) {
-            int centerX = (int) Math.floor(view.centerX(hovered));
+        // 十字线先画，最新价格标签后画：两个价格标签重叠时，最新价格盖在上面。
+        // 鼠标在没有 K 线的位置（最新一根右侧的留白）也画十字线，竖线吸附到那里的 K 线槽位，时间按周期外推
+        int hovered = -1;
+        boolean crosshair = !isDragging() && !panel.contains(mouseX, mouseY) && mouseX >= left && mouseX < plotRight
+                && mouseY >= mainTop && mouseY < volumeBottom;
+        if (crosshair) {
+            int slot = (int) Math.floor(view.indexAt(mouseX));
+            hovered = slot >= 0 && slot < candles.size() ? slot : -1;
+            int centerX = (int) Math.floor(view.centerX(slot));
             extractCrosshair(graphics, left, plotRight, axisLeft, right, mainTop, mainHeight, volumeBottom, centerX, mouseY, scale);
-            String time = MarketFormat.marketTime(new MarketTime(candles.get(hovered).start()));
+            long start = hovered >= 0 ? candles.get(hovered).start()
+                    : candles.get(candles.size() - 1).start() + (long) (slot - (candles.size() - 1)) * period.seconds();
+            String time = MarketFormat.marketTime(new MarketTime(start));
             int timeWidth = font.width(time) + 6;
             int timeLeft = Math.max(left, Math.min(centerX - timeWidth / 2, plotRight - timeWidth));
             graphics.fill(timeLeft, timeAxisTop, timeLeft + timeWidth, bottom, TradingPalette.DIVIDER);
             graphics.text(font, time, timeLeft + 3, timeAxisTop + 1, TradingPalette.TEXT_PRIMARY, false);
-        } else {
-            hovered = -1;
         }
         extractLastPrice(graphics, candles.get(candles.size() - 1), left, plotRight, axisLeft, right, scale, lastPriceY);
         extractLegend(graphics, settings, left, top, right, legendHeight, candles, ma, hovered < 0 ? last : hovered, mouseX, mouseY);
